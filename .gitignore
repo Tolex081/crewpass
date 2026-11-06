@@ -1,5 +1,6 @@
 target/
 node_modules/
+.vercel/
 dist/
 .env
 *.json.key
