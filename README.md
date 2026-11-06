@@ -21,6 +21,8 @@ withdraw and the page access go to the buyer in the same transaction, and the se
 | `crewpass-alice.testnet` | Demo: first ambassador (referrer) |
 | `crewpass-bob.testnet` | Demo: fan who mints using Alice's pass |
 | `crewpass-carol.testnet` | Demo: buyer of Alice's pass |
+| `crewpass-evil.testnet` | Test-only attacker contract ([source](test-receiver/src/lib.rs)) |
+| `crewpass-accomplice.testnet` | Where the attacker tries to send stolen passes |
 
 All were created through the free testnet faucet. Their keys are not in this repository.
 
@@ -29,6 +31,12 @@ All were created through the free testnet faucet. Their keys are not in this rep
 **Without installing anything.** Open [deploy/live-run.md](deploy/live-run.md). Each row is a real
 testnet transaction with an explorer link: two mints with a referral, a sale, and the old owner's
 three attempts after the sale, each refused with the contract's own error.
+
+**See the hardest attack fail, live.** Open [deploy/attack-run.md](deploy/attack-run.md). A hostile
+contract (`crewpass-evil.testnet`) receives pass #1 through `nft_transfer_call`, which makes it the
+owner for a moment, and tries to withdraw the vault, move the pass to an accomplice, and list it.
+Each transaction shows CrewPass refusing the attack ("pass is in the middle of nft_transfer_call"),
+the pass returning to its holder, and the 0.01 NEAR vault unchanged.
 
 **Read the live contract yourself** (needs [near-cli-rs](https://github.com/near/near-cli-rs), no account):
 
