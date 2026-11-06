@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n api,web \"tsx watch server/dev.ts\" \"vite\"",
+    "dev": "concurrently -n api,web \"tsx watch --use-system-ca server/dev.ts\" \"vite\"",
     "build": "vite build",
     "test": "tsx --test server/*.test.ts"
   },

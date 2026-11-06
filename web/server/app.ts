@@ -90,7 +90,12 @@ export function createApp(o: AppOptions) {
     if (permission !== "FullAccess") {
       return c.json({ error: "The key you signed in with is no longer on this account. Sign in again." }, 401);
     }
-    const passes = await o.chain.view<Token[]>("nft_tokens_for_owner", { account_id: session.accountId, from_index: "0", limit: 50 });
+    // fresh: never answer an access decision from cache, or a seller could get in for a few seconds after a sale.
+    const passes = await o.chain.view<Token[]>(
+      "nft_tokens_for_owner",
+      { account_id: session.accountId, from_index: "0", limit: 50 },
+      { fresh: true },
+    );
     if (passes.length === 0) {
       return c.json({ error: "This account does not hold a CrewPass. Members content is only for current holders.", accountId: session.accountId }, 403);
     }

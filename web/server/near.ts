@@ -3,7 +3,8 @@
 export interface Chain {
   /** "FullAccess", "FunctionCall", or null when the key is not on the account. */
   accessKeyPermission(accountId: string, publicKey: string): Promise<"FullAccess" | "FunctionCall" | null>;
-  view<T>(method: string, args: object): Promise<T>;
+  /** `fresh` skips the short view cache: use it for every access decision. */
+  view<T>(method: string, args: object, opts?: { fresh?: boolean }): Promise<T>;
   /** CrewPass events from the contract's recent transactions, newest first. */
   recentEvents(): Promise<ChainEvent[]>;
 }
@@ -18,18 +19,38 @@ export interface ChainEvent {
 }
 
 export interface ChainConfig {
-  rpcUrl: string;
+  /** Tried in order; the next one is used only when a node cannot be reached. */
+  rpcUrls: string[];
   contract: string;
   nearblocksUrl: string; // e.g. https://api-testnet.nearblocks.io
 }
 
 export const testnetConfig = (contract = "crewpass.testnet"): ChainConfig => ({
-  rpcUrl: process.env.NEAR_RPC_URL ?? "https://rpc.testnet.near.org",
+  rpcUrls: process.env.NEAR_RPC_URL
+    ? [process.env.NEAR_RPC_URL]
+    : ["https://rpc.testnet.fastnear.com", "https://rpc.testnet.near.org"],
   contract,
   nearblocksUrl: process.env.NEARBLOCKS_URL ?? "https://api-testnet.nearblocks.io",
 });
 
-async function rpc<T>(url: string, method: string, params: unknown): Promise<T> {
+async function rpc<T>(urls: string[], method: string, params: unknown): Promise<T> {
+  let lastNetworkError: unknown;
+  for (const url of urls) {
+    try {
+      return await rpcOnce<T>(url, method, params);
+    } catch (e) {
+      // Only an unreachable node moves on to the next one; an answer from the chain is final.
+      if (e instanceof TypeError || (e as Error).name === "TimeoutError") {
+        lastNetworkError = e;
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastNetworkError;
+}
+
+async function rpcOnce<T>(url: string, method: string, params: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -48,13 +69,18 @@ async function rpc<T>(url: string, method: string, params: unknown): Promise<T> 
   return json.result as T;
 }
 
+/** Read-only views are cached briefly so one page load doesn't repeat the same calls.
+ *  Access-key checks are never cached: they decide who may sign in. */
+const VIEW_CACHE_MS = 4_000;
+
 export function nearChain(cfg: ChainConfig): Chain {
   let cache: { at: number; events: ChainEvent[] } | null = null;
+  const views = new Map<string, { at: number; value: Promise<unknown> }>();
 
   return {
     async accessKeyPermission(accountId, publicKey) {
       try {
-        const r = await rpc<{ permission: "FullAccess" | { FunctionCall: unknown } }>(cfg.rpcUrl, "query", {
+        const r = await rpc<{ permission: "FullAccess" | { FunctionCall: unknown } }>(cfg.rpcUrls, "query", {
           request_type: "view_access_key",
           finality: "final",
           account_id: accountId,
@@ -68,15 +94,20 @@ export function nearChain(cfg: ChainConfig): Chain {
       }
     },
 
-    async view<T>(method: string, args: object) {
-      const r = await rpc<{ result: number[] }>(cfg.rpcUrl, "query", {
+    async view<T>(method: string, args: object, opts?: { fresh?: boolean }) {
+      const key = `${method}:${JSON.stringify(args)}`;
+      const hit = views.get(key);
+      if (!opts?.fresh && hit && Date.now() - hit.at < VIEW_CACHE_MS) return hit.value as Promise<T>;
+      const value = rpc<{ result: number[] }>(cfg.rpcUrls, "query", {
         request_type: "call_function",
         finality: "final",
         account_id: cfg.contract,
         method_name: method,
         args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
-      });
-      return JSON.parse(Buffer.from(r.result).toString("utf8")) as T;
+      }).then((r) => JSON.parse(Buffer.from(r.result).toString("utf8")) as T);
+      views.set(key, { at: Date.now(), value });
+      value.catch(() => views.delete(key));
+      return value;
     },
 
     async recentEvents() {
@@ -91,7 +122,7 @@ export function nearChain(cfg: ChainConfig): Chain {
       const events: ChainEvent[] = [];
       for (const tx of txns.filter((t) => t.receiver_account_id === cfg.contract)) {
         const status = await rpc<{ receipts_outcome: { outcome: { executor_id: string; logs: string[] } }[] }>(
-          cfg.rpcUrl,
+          cfg.rpcUrls,
           "EXPERIMENTAL_tx_status",
           { tx_hash: tx.transaction_hash, sender_account_id: tx.signer_account_id, wait_until: "FINAL" },
         ).catch(() => null);

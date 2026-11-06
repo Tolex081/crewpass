@@ -46,5 +46,11 @@ npm run dev        # server on :8787, pages on :5173
 npm test           # server security tests
 ```
 
+The API server runs Node with `--use-system-ca`, so it trusts the operating system's certificate
+store. Without it, antivirus HTTPS scanning (Avast on the development machine) makes every RPC call
+fail with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. Certificate checks stay on.
+
+The API port is `API_PORT` (default 8787), not `PORT`, because dev launchers set `PORT` for Vite.
+
 `SESSION_SECRET` (any long random string) must be set in production. Locally a random one is
 generated at start, which signs everyone out on restart.

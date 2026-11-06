@@ -16,5 +16,6 @@ const app = createApp({
   recipient: process.env.NEP413_RECIPIENT ?? "crewpass.app",
 });
 
-const port = Number(process.env.PORT ?? 8787);
+// Not PORT: dev launchers set PORT for the page server (Vite), which would collide.
+const port = Number(process.env.API_PORT ?? 8787);
 serve({ fetch: app.fetch, port }, () => console.log(`CrewPass API on http://localhost:${port}/api`));

@@ -15,12 +15,14 @@ const secret = new TextEncoder().encode("test-secret-test-secret-test-secret");
 function fakeChain() {
   const owners = new Map<string, string>([["1", "alice.testnet"]]);
   const keys = new Map<string, Map<string, "FullAccess" | "FunctionCall">>();
+  const ownershipReads: { fresh: boolean }[] = [];
   const chain: Chain = {
     async accessKeyPermission(accountId, publicKey) {
       return keys.get(accountId)?.get(publicKey) ?? null;
     },
-    async view<T>(method: string, args: Record<string, unknown>): Promise<T> {
+    async view<T>(method: string, args: Record<string, unknown>, opts?: { fresh?: boolean }): Promise<T> {
       if (method === "nft_tokens_for_owner") {
+        ownershipReads.push({ fresh: !!opts?.fresh });
         return [...owners].filter(([, o]) => o === args.account_id).map(([token_id, owner_id]) => ({ token_id, owner_id })) as T;
       }
       if (method === "pass_info") {
@@ -33,7 +35,7 @@ function fakeChain() {
       return [];
     },
   };
-  return { chain, owners, keys };
+  return { chain, owners, keys, ownershipReads };
 }
 
 async function wallet(accountId: string) {
@@ -187,6 +189,7 @@ test("old_owner_gets_403_after_sale: ownership is re-checked on every request", 
   const after = await s.members(body.token); // same, still-valid session
   assert.equal(after.status, 403);
   assert.match(((await after.json()) as { error: string }).error, /does not hold a CrewPass/);
+  assert.ok(s.ownershipReads.length >= 2 && s.ownershipReads.every((r) => r.fresh), "ownership must never come from cache");
 });
 
 test("members area refuses a missing, tampered or expired session", async () => {
