@@ -1,0 +1,15 @@
+{
+  "network": "testnet",
+  "contract": "crewpass.testnet",
+  "creator": "crewpass.testnet",
+  "demo_accounts": {
+    "alice": "crewpass-alice.testnet",
+    "bob": "crewpass-bob.testnet",
+    "carol": "crewpass-carol.testnet"
+  },
+  "settings": {
+    "mint_price_near": "0.1",
+    "commission_bps": 1000
+  },
+  "keys": "not stored here; near-cli-rs legacy keychain in WSL (~/.near-credentials/testnet/)"
+}
