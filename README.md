@@ -5,6 +5,7 @@ with your pass as their referrer add a 10% commission to that vault. Whoever hol
 withdraw the vault and open the members-only page. When the pass is sold, the vault, the right to
 withdraw and the page access go to the buyer in the same transaction, and the seller is locked out.
 
+- **Live site:** https://crewpass-steel.vercel.app (passes, pass history, members area, proof)
 - **Track:** `nfts` · **Network:** NEAR testnet · **License:** MIT
 - **Status:** Contract live on testnet at `crewpass.testnet`, tested locally (36 unit tests, 6 NEAR sandbox tests) and in a recorded live run. Front end not built yet.
 - **Security design:** [THREAT_MODEL.md](THREAT_MODEL.md)
@@ -27,6 +28,11 @@ withdraw and the page access go to the buyer in the same transaction, and the se
 All were created through the free testnet faucet. Their keys are not in this repository.
 
 ## Try it
+
+**In the browser.** Open https://crewpass-steel.vercel.app. You see every pass with its holder and
+vault, read live from `crewpass.testnet`. Open pass #1: its history shows the mint, both referrals,
+the sale to Carol with the vault moving with it, and three blocked attacks. The Proof tab lists every
+recorded transaction with explorer links.
 
 **Without installing anything.** Open [deploy/live-run.md](deploy/live-run.md). Each row is a real
 testnet transaction with an explorer link: two mints with a referral, a sale, and the old owner's
