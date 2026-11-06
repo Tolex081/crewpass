@@ -24,5 +24,14 @@ export function when(ms: number): string {
   return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export const explorerTx = (hash: string) => `https://testnet.nearblocks.io/txns/${hash}`;
+export const HUES = ["teal", "coral", "violet", "sun", "cobalt", "green"] as const;
+export type Hue = (typeof HUES)[number];
+
+/** Each pass wears one lanyard colour, fixed by its number: #1 teal, #2 coral, #3 violet, … */
+export function hueFor(tokenId: string): Hue {
+  const n = Number.parseInt(tokenId, 10);
+  return HUES[(Number.isFinite(n) && n > 0 ? n - 1 : 0) % HUES.length];
+}
+
+export const explorerTx =(hash: string) => `https://testnet.nearblocks.io/txns/${hash}`;
 export const explorerAccount = (id: string) => `https://testnet.nearblocks.io/address/${id}`;

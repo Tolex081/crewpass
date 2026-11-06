@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Config, type PassInfo } from "../lib/api";
-import { near } from "../lib/format";
+import { HUES, near } from "../lib/format";
 import { errorText, useWallet } from "../lib/wallet";
 import { PassCard } from "../components/PassCard";
 
@@ -48,6 +48,9 @@ export function PassesPage({ config }: { config: Config | null }) {
   return (
     <>
       <section className="intro">
+        <div className="ribbons" aria-hidden="true">
+          {HUES.map((h) => <span key={h} className={`hue-${h}`} />)}
+        </div>
         <h1>Passes that carry their own earnings</h1>
         <p>
           Each Ambassador Pass has a vault. When a fan mints through your pass, {config ? config.commission_bps / 100 : 10}% of the
@@ -55,15 +58,33 @@ export function PassesPage({ config }: { config: Config | null }) {
         </p>
       </section>
 
+      <ol className="steps" aria-label="How a pass earns">
+        <li className="hue-teal">
+          <span className="n">1</span>
+          <strong>Share your pass link</strong>
+          <p>Every pass has its own link. A fan mints through it for Ⓝ {config ? near(config.mint_price) : "0.1"}.</p>
+        </li>
+        <li className="hue-sun">
+          <span className="n">2</span>
+          <strong>Ⓝ {near(commission)} lands in its vault</strong>
+          <p>Stored against the pass, not you. Withdraw it whenever you hold the pass.</p>
+        </li>
+        <li className="hue-coral">
+          <span className="n">3</span>
+          <strong>Sell it, and the vault goes too</strong>
+          <p>The buyer gets the vault, future commissions and the members area. You are locked out at once.</p>
+        </li>
+      </ol>
+
       <section className="split">
         <div className="panel">
           <h2>Mint a pass</h2>
           <div className="stats">
-            <div>
+            <div className="hue-teal">
               <span className="label">Price</span>
               <strong className="num">Ⓝ {config ? near(config.mint_price) : "…"}</strong>
             </div>
-            <div>
+            <div className="hue-sun">
               <span className="label">To the referrer</span>
               <strong className="num">Ⓝ {near(commission)}</strong>
             </div>

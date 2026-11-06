@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>CrewPass</title>
+    <script>
+      // Apply a saved Light/Dark choice before first paint. No saved choice = follow the system.
+      try {
+        var t = localStorage.getItem("crewpass.theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
     <meta name="description" content="Creator Ambassador Passes on NEAR. Each pass carries its own vault, and the vault follows the pass." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

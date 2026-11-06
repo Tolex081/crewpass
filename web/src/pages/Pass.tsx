@@ -1,40 +1,48 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type Config, type HistoryEvent, type PassInfo } from "../lib/api";
-import { explorerTx, near, shortAccount, toYocto, when } from "../lib/format";
+import { explorerTx, near, shortAccount, toYocto, when, type Hue } from "../lib/format";
 import { errorText, useWallet } from "../lib/wallet";
 import { PassCard } from "../components/PassCard";
 
 const ONE_YOCTO = "1";
 
-/** One readable line per event, from this pass's point of view. Null hides duplicates. */
-function describe(e: HistoryEvent, id: string): ReactNode | null {
+interface Line {
+  tag: string;
+  hue: Hue;
+  text: ReactNode;
+}
+
+/** One readable line per event, from this pass's point of view, with a colour-coded tag. Null hides duplicates. */
+function describe(e: HistoryEvent, id: string): Line | null {
   const d = e.data as Record<string, string>;
   const acct = (a: string) => <span className="mono">{shortAccount(a)}</span>;
   switch (e.event) {
     case "pass_minted":
-      return d.token_id === id ? (
-        <>Minted by {acct(d.owner_id)}{d.referrer_token_id ? <> through pass #{d.referrer_token_id}</> : null}</>
-      ) : (
-        <>Referred a new fan: pass #{d.token_id} minted by {acct(d.owner_id)}</>
-      );
+      return d.token_id === id
+        ? { tag: "Mint", hue: "teal", text: <>Minted by {acct(d.owner_id)}{d.referrer_token_id ? <> through pass #{d.referrer_token_id}</> : null}</> }
+        : { tag: "Referral", hue: "violet", text: <>Referred a new fan: pass #{d.token_id} minted by {acct(d.owner_id)}</> };
     case "commission_credited":
-      return d.token_id === id ? <>Commission of Ⓝ {near(d.amount)} added to the vault</> : null;
+      return d.token_id === id ? { tag: "Commission", hue: "sun", text: <>Ⓝ {near(d.amount)} added to the vault</> } : null;
     case "pass_listed":
-      return <>Listed for Ⓝ {near(d.price)} by {acct(d.seller)}</>;
+      return { tag: "Listed", hue: "cobalt", text: <>Listed for Ⓝ {near(d.price)} by {acct(d.seller)}</> };
     case "pass_delisted":
-      return <>Taken off sale</>;
+      return { tag: "Off sale", hue: "cobalt", text: <>Taken off sale</> };
     case "pass_sold":
-      return <>Sold by {acct(d.seller)} to {acct(d.buyer)} for Ⓝ {near(d.price)}; the vault (Ⓝ {near(d.vault)}) went with it</>;
+      return { tag: "Sale", hue: "coral", text: <>Sold by {acct(d.seller)} to {acct(d.buyer)} for Ⓝ {near(d.price)}; the vault (Ⓝ {near(d.vault)}) went with it</> };
     case "vault_withdrawn":
-      return <>{acct(d.to)} withdrew Ⓝ {near(d.amount)} from the vault</>;
+      return { tag: "Withdraw", hue: "green", text: <>{acct(d.to)} withdrew Ⓝ {near(d.amount)} from the vault</> };
     case "transfer_call_locked":
-      return <>Locked while sent to contract {acct(d.receiver_id)}</>;
+      return { tag: "Locked", hue: "violet", text: <>Locked while sent to contract {acct(d.receiver_id)}</> };
     case "transfer_call_unlocked":
-      return <>Unlocked: {String(e.data.kept_by_receiver) === "true" ? "the receiving contract kept it" : "returned to its holder"}</>;
+      return {
+        tag: "Unlocked",
+        hue: "violet",
+        text: <>{String(e.data.kept_by_receiver) === "true" ? "The receiving contract kept it" : "Returned to its holder"}</>,
+      };
     case "nft_transfer":
-      return d.memo === "crewpass sale" ? null : <>Moved from {acct(d.old_owner_id)} to {acct(d.new_owner_id)}</>;
+      return d.memo === "crewpass sale" ? null : { tag: "Moved", hue: "cobalt", text: <>From {acct(d.old_owner_id)} to {acct(d.new_owner_id)}</> };
     case "nft_burn":
-      return <>Burned by {acct(d.owner_id)}</>;
+      return { tag: "Burned", hue: "coral", text: <>Burned by {acct(d.owner_id)}</> };
     default:
       return null; // nft_mint duplicates pass_minted
   }
@@ -86,7 +94,9 @@ export function PassPage({ id, config }: { id: string; config: Config | null }) 
   const mine = wallet.accountId === pass.owner_id;
   const listed = pass.listing;
   const refLink = `${window.location.origin}/?ref=${pass.token_id}`;
-  const lines = (history?.events ?? []).map((e) => ({ e, text: describe(e, id) })).filter((x) => x.text);
+  const lines = (history?.events ?? [])
+    .map((e) => ({ e, line: describe(e, id) }))
+    .filter((x): x is { e: HistoryEvent; line: Line } => x.line !== null);
 
   async function copy() {
     try {
@@ -115,10 +125,10 @@ export function PassPage({ id, config }: { id: string; config: Config | null }) 
 
         <div style={{ display: "grid", gap: 20, minWidth: 0 }}>
           <div className="stats">
-            <div><span className="label">In the vault</span><strong className="num">Ⓝ {near(pass.vault)}</strong></div>
-            <div><span className="label">Withdrawn</span><strong className="num">Ⓝ {near(pass.stats.withdrawn)}</strong></div>
-            <div><span className="label">Referrals</span><strong className="num">{pass.stats.referrals}</strong></div>
-            <div><span className="label">Times sold or moved</span><strong className="num">{pass.stats.transfers}</strong></div>
+            <div className="hue-sun"><span className="label">In the vault</span><strong className="num">Ⓝ {near(pass.vault)}</strong></div>
+            <div className="hue-green"><span className="label">Withdrawn</span><strong className="num">Ⓝ {near(pass.stats.withdrawn)}</strong></div>
+            <div className="hue-violet"><span className="label">Referrals</span><strong className="num">{pass.stats.referrals}</strong></div>
+            <div className="hue-coral"><span className="label">Times sold or moved</span><strong className="num">{pass.stats.transfers}</strong></div>
           </div>
 
           <div className="panel">
@@ -208,10 +218,11 @@ export function PassPage({ id, config }: { id: string; config: Config | null }) 
             {history && history.complete && lines.length === 0 && <p className="muted">No recorded activity yet.</p>}
             {lines.length > 0 && (
               <ol className="timeline">
-                {lines.map(({ e, text }, i) => (
+                {lines.map(({ e, line }, i) => (
                   <li key={`${e.txHash}-${i}`}>
                     <time dateTime={new Date(e.timestampMs).toISOString()}>{when(e.timestampMs)}</time>
-                    <span className="what">{text}</span>
+                    <span className={`tag hue-${line.hue}`}>{line.tag}</span>
+                    <span className="what">{line.text}</span>
                     <a href={explorerTx(e.txHash)} target="_blank" rel="noreferrer" className="mono" style={{ fontSize: "var(--step--1)" }}>
                       {e.txHash.slice(0, 6)}…
                     </a>

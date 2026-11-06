@@ -1,5 +1,5 @@
 import type { PassInfo } from "../lib/api";
-import { near, shortAccount } from "../lib/format";
+import { hueFor, near, shortAccount } from "../lib/format";
 
 /** Deterministic bar widths from the pass number and holder, like a printed laminate's code. */
 function bars(seed: string): number[] {
@@ -51,7 +51,7 @@ export function PassCard({ pass, big = false, href }: { pass: PassInfo; big?: bo
       <Barcode seed={`${pass.token_id}:${pass.owner_id}`} />
     </>
   );
-  const cls = `pass${big ? " big" : ""}`;
+  const cls = `pass hue-${hueFor(pass.token_id)}${big ? " big" : ""}`;
   return href ? (
     <a className={cls} href={href} aria-label={`Pass ${pass.token_id}, held by ${pass.owner_id}`}>
       {body}

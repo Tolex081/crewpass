@@ -6,6 +6,7 @@ import { PassesPage } from "./pages/Passes";
 import { PassPage } from "./pages/Pass";
 import { MembersPage } from "./pages/Members";
 import { ProofPage } from "./pages/Proof";
+import { ThemeToggle } from "./components/ThemeToggle";
 
 function useRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash || "#/");
@@ -44,6 +45,7 @@ export function App() {
             <a href="#/proof" aria-current={section === "proof" ? "page" : undefined}>Proof</a>
           </nav>
           <span className="net">testnet</span>
+          <ThemeToggle />
           {wallet.accountId ? (
             <button className="quiet" onClick={() => wallet.disconnect()} title="Disconnect wallet">
               <span className="mono">{shortAccount(wallet.accountId)}</span>
