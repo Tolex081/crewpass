@@ -6,23 +6,48 @@ withdraw the vault and open the members-only page. When the pass is sold, the va
 withdraw and the page access go to the buyer in the same transaction, and the seller is locked out.
 
 - **Track:** `nfts` · **Network:** NEAR testnet · **License:** MIT
-- **Status:** Day 2. Contract built and tested locally (36 unit tests, 6 NEAR sandbox tests). Not deployed yet.
+- **Status:** Contract live on testnet at `crewpass.testnet`, tested locally (36 unit tests, 6 NEAR sandbox tests) and in a recorded live run. Front end not built yet.
 - **Security design:** [THREAT_MODEL.md](THREAT_MODEL.md)
+- **House of Stake (TLA):** not used. Our investigation is **incomplete**: their transfer behaviour
+  is known from reading their code, not from running their tests. Details in
+  [THREAT_MODEL.md](THREAT_MODEL.md#house-of-stake-tla-investigation-incomplete).
 
 ## Testnet accounts
 
 | Account | Role |
 |---|---|
-| `crewpass.testnet` | Where the CrewPass contract will be deployed; the creator |
+| `crewpass.testnet` | The CrewPass contract |
+| `crewpass-creator.testnet` | The creator, who receives mint income through `claim` |
 | `crewpass-alice.testnet` | Demo: first ambassador (referrer) |
 | `crewpass-bob.testnet` | Demo: fan who mints using Alice's pass |
 | `crewpass-carol.testnet` | Demo: buyer of Alice's pass |
 
 All were created through the free testnet faucet. Their keys are not in this repository.
 
-## Try it (to be filled in as each piece is built)
+## Try it
 
-Steps for a judge, in "do X, see Y" form, will go here once the contract is deployed.
+**Without installing anything.** Open [deploy/live-run.md](deploy/live-run.md). Each row is a real
+testnet transaction with an explorer link: two mints with a referral, a sale, and the old owner's
+three attempts after the sale, each refused with the contract's own error.
+
+**Read the live contract yourself** (needs [near-cli-rs](https://github.com/near/near-cli-rs), no account):
+
+1. Run `near contract call-function as-read-only crewpass.testnet pass_info json-args '{"token_id":"1"}' network-config testnet now`.
+   You see pass #1 owned by `crewpass-carol.testnet` (it was Alice's), with `referrals: 1`,
+   `earned` and `withdrawn` both 0.01 NEAR, and `transfers: 1`.
+2. Run `near contract call-function as-read-only crewpass.testnet accounting json-args '{}' network-config testnet now`.
+   You see `"solvent": true`: the contract holds at least everything it owes plus its storage.
+
+**Run the attacks yourself, free** (Linux or WSL2):
+
+1. Run `scripts/test.sh`. You see 36 unit tests and 6 sandbox tests pass.
+2. In the output, `malicious_receiver_cannot_touch_vault_during_transfer_call` is a real attacker
+   contract ([test-receiver](test-receiver/src/lib.rs)) that receives a pass through
+   `nft_transfer_call` and tries to withdraw, move and list it before handing it back. All three are
+   refused and the vault is untouched.
+
+The contract on testnet was built from commit `5d034f3`; wasm sha256 is in
+[deploy/testnet.json](deploy/testnet.json).
 
 ## Layout
 
@@ -30,7 +55,7 @@ Steps for a judge, in "do X, see Y" form, will go here once the contract is depl
 THREAT_MODEL.md   every attack, how it is blocked, and the test that proves it
 contract/         the CrewPass contract (Rust, near-sdk 5.30.1) and its tests
 test-receiver/    test-only attacker contract used by the sandbox tests
-scripts/          test.sh (unit + sandbox), verify-hos.sh (House of Stake check)
+scripts/          test.sh (unit + sandbox), verify-hos.sh (House of Stake check, not yet completed)
 web/              members-only page and pass history           [Day 7]
 deploy/           testnet account list and deploy scripts
 ```

@@ -85,9 +85,27 @@ Tests marked *(s)* are sandbox tests; the rest are unit tests.
 - **R4. Fake-account referrals.** One person with two accounts can still refer themselves. Not solvable without identity checks.
 - **R5. Not audited.** Built and tested by us in two days; uses `near-contract-standards` 5.30.1 for the NEP-171 core.
 
+## House of Stake (TLA) investigation: INCOMPLETE
+
+CrewPass does not use House of Stake Top Level Accounts and does not depend on them. We looked at
+them because the NFT track points to them. What we know, and how we know it:
+
+| Claim | Evidence | Verified by running code? |
+|---|---|---|
+| A TLA name is a NEP-171 token that is also a keyless NEAR account, live on mainnet at `registry.hos` | `houseofstake/tla-contracts` source; mainnet RPC calls (`get_stats`, `nft_tokens`, code hashes) | Read-only mainnet calls only |
+| On a sale, the name's NEAR balance is swept to the **seller**, and transfers are refused while the name holds allowlisted tokens | Source: `hos-wallet` `apply_rotation`, `tla-registry` `nft_transfer`; their test `a_sale_pays_the_sellers_balance_out_with_the_name` | **No** |
+| The seller's control (extensions, spend grants) is removed on transfer | Source: `apply_rotation` | **No** |
+| There is no House of Stake deployment on testnet | Testnet RPC: `hos` does not exist | Yes (read-only) |
+
+`scripts/verify-hos.sh` builds their contracts at the mainnet commit (`bf0b65d`) and runs their own
+transfer tests, first from source, then on the exact mainnet bytecode. **It has not completed.** On
+2026-11-06 it built 6 of their contracts, then compiling their integration tests crashed WSL twice
+(on a machine with about 8 GB for WSL). Until it runs to the end, everything in the "No" rows above is
+from reading their code, not from executing it.
+
 ## Not claimed
 
 - Stopping someone making fake accounts to refer themselves. T11 only stops a pass referring itself; anything more needs identity checks, which v1 doesn't have.
 - Making a seller forget what was on the members-only page.
 - That the members-only content can't be copied by someone who could see it while they held the pass.
-- Any connection to House of Stake. It runs on mainnet only. CrewPass follows its idea (control, access and value move with the token) in its own contract.
+- Any connection to House of Stake. It runs on mainnet only. CrewPass follows its idea (control, access and value move with the token) in its own contract. See "House of Stake (TLA) investigation: INCOMPLETE" above.
