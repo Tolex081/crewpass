@@ -37,6 +37,14 @@ events (`pass_minted`, `commission_credited`, `pass_sold`, `vault_withdrawn`, NE
 from a NEAR RPC node. If NearBlocks is unavailable, the page shows the on-chain counters from
 `pass_info` and says the full history is temporarily unavailable.
 
+## AI companion
+
+`/api/companion/:tokenId` (GET history, POST a message) and `/api/companion/:tokenId/memory` (DELETE).
+Only the current holder of that pass, checked on chain on every request. Memory is encrypted
+(AES-256-GCM) per pass and holder; the model is any OpenAI-compatible API set by environment
+variables, or an offline mode without one. Full design: [docs/PRODUCT.md](../docs/PRODUCT.md) §6;
+environment variables: §10; threats C1 to C10: [THREAT_MODEL.md](../THREAT_MODEL.md).
+
 ## Run locally
 
 ```bash

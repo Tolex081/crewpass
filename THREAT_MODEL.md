@@ -77,6 +77,23 @@ Tests marked *(s)* are sandbox tests; the rest are unit tests.
 | T19 | Burning a pass that still holds money | `burn` refuses unless the vault is zero | `burn_refused_with_nonzero_vault`, `burn_allowed_when_vault_empty`, `burn_only_with_empty_vault` *(s)* | proven |
 | T20 | Fake or tampered history | Only the contract writes counters and events, in the same receipt as the action | Events visible in every sandbox test log; web check Day 7 | design |
 
+## AI companion threats (added 2026-11-08)
+
+The companion is server-side and read-only (no tools, no keys). Tests: `web/server/companion.test.ts`.
+
+| # | Threat | How it's blocked | Tests | Status |
+|---|---|---|---|---|
+| C1 | A signed-in member uses another pass's companion | Every request re-reads `nft_token` (never cached) and requires `owner_id == session account` | `C1: a signed-in member cannot use the companion of a pass they do not hold` | proven |
+| C2 | No or forged session | Same NEP-413 session and full-access key check as the members area | `C2: no session, no companion`, `members area refuses a missing, tampered or expired session` | proven |
+| C3 | One holder reads another holder's memory | Memory key includes token and account; server only loads the caller's key | `C3: two holders never see each other's memory` | proven |
+| C4 | Seller keeps using the companion, or buyer sees the seller's chats | Ownership re-checked per request; buyer's key is different, so their memory starts empty | `C4: after a transfer the seller is locked out and the buyer starts with empty memory` | proven |
+| C5 | A seller cannot erase what they shared | Delete needs only the seller's own session, not current ownership | `C5: a seller can still delete what they told the companion` | proven |
+| C6 | Memory readable or movable at rest | AES-256-GCM with the record key as associated data; tampered or moved values do not decrypt | `C6: memory is encrypted at rest and bound to its holder's key` | proven |
+| C7 | Abuse or cost blow-up | 20 messages per 10 minutes per account (Upstash counter shared across instances); 1000-character messages | `C7: rate limit per account`, `messages are validated` | proven |
+| C8 | Model failure corrupts memory, or leaks the API key | Nothing saved on failure; provider error text never shown; key redacted from logs | `C8: a failed model call saves nothing`, `OpenAI-compatible provider: …` | proven |
+| C9 | Prompt injection through creator knowledge or member messages | Fixed system rules; knowledge and pass state quoted as data with closing tags neutralised; no tools, so the worst case is a wrong answer, never an action | `untrusted knowledge cannot close its data block` | partial: a model can still be talked into a wrong answer |
+| C10 | Private chats used by the AI provider | Members see a notice before the first message; Gemini's free tier states it may use content to improve Google's products | UI notice | open (documented); private provider planned |
+
 ## Open risks (Day 2)
 
 - **R1. Lock stuck if `nft_resolve_transfer` runs out of gas.** The standard library gives it a fixed 5 TGas. If it ever ran out, the pass would stay locked (no withdraw, no transfer) with no way to clear it. It fits comfortably today, but there is no admin escape hatch by design.

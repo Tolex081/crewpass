@@ -3,6 +3,7 @@ import { api, ApiError } from "../lib/api";
 import { near } from "../lib/format";
 import { errorText, useWallet } from "../lib/wallet";
 import { PassCard } from "../components/PassCard";
+import { Companion } from "../components/Companion";
 
 type Members = Awaited<ReturnType<typeof api.members>>;
 const KEY = "crewpass.session";
@@ -126,6 +127,16 @@ export function MembersPage() {
             </div>
             <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
               <span className="label">{data.content.label} · from {data.content.creator}</span>
+              <article className="panel">
+                <h2>{data.programme.name}</h2>
+                <p className="muted">{data.programme.summary}</p>
+                <ul className="benefits">
+                  {data.programme.benefits.map((b) => <li key={b}>{b}</li>)}
+                </ul>
+                <p className="muted" style={{ fontSize: "var(--step--1)" }}>
+                  Tiers ({data.programme.tiers.names.join(", ")}): {data.programme.tiers.note}
+                </p>
+              </article>
               {data.content.posts.map((post) => (
                 <article key={post.title} className="panel">
                   <h2>{post.title}</h2>
@@ -134,6 +145,16 @@ export function MembersPage() {
               ))}
             </div>
           </section>
+          {token && (
+            <Companion
+              token={token}
+              passes={data.passes}
+              onLockedOut={(msg) => {
+                setData(null);
+                setRefused(msg);
+              }}
+            />
+          )}
         </>
       )}
     </>

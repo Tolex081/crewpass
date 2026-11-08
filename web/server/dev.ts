@@ -3,17 +3,21 @@ import { serve } from "@hono/node-server";
 import { randomBytes } from "node:crypto";
 import { createApp } from "./app.js";
 import { nearChain, testnetConfig } from "./near.js";
+import { companionFromEnv } from "./setup.js";
 
 const secretEnv = process.env.SESSION_SECRET;
 if (!secretEnv) console.warn("SESSION_SECRET not set: using a random one; sessions end when the server restarts.");
 const secret = secretEnv ? new TextEncoder().encode(secretEnv) : randomBytes(32);
 
 const contract = process.env.CREWPASS_CONTRACT ?? "crewpass.testnet";
+const companion = companionFromEnv(process.env, true);
+for (const note of companion.notes) console.warn(note);
 const app = createApp({
   chain: nearChain(testnetConfig(contract)),
   secret,
   contract,
   recipient: process.env.NEP413_RECIPIENT ?? "crewpass.app",
+  companion: companion.deps,
 });
 
 // Not PORT: dev launchers set PORT for the page server (Vite), which would collide.

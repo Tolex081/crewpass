@@ -27,6 +27,12 @@ export interface HistoryEvent {
   data: Record<string, unknown>;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  at: number;
+}
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
     super(message);
@@ -52,11 +58,35 @@ export const api = {
     if (!res.ok || !data.token) throw new ApiError(data.error ?? "Sign-in failed", res.status);
     return data.token;
   },
+  companionInfo: () =>
+    get<{ name: string; mode: "model" | "offline"; model: string; dataNotice: string; memoryPersists: boolean; maxInputChars: number }>(
+      "/companion/info",
+    ),
+  companionHistory: (token: string, id: string) =>
+    get<{ history: ChatMessage[] }>(`/companion/${encodeURIComponent(id)}`, token),
+  async companionSend(token: string, id: string, message: string) {
+    const res = await fetch(`/api/companion/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { reply?: string; error?: string };
+    if (!res.ok || !data.reply) throw new ApiError(data.error ?? `Request failed (${res.status})`, res.status);
+    return data.reply;
+  },
+  async companionClear(token: string, id: string) {
+    const res = await fetch(`/api/companion/${encodeURIComponent(id)}/memory`, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new ApiError(data.error ?? `Request failed (${res.status})`, res.status);
+    }
+  },
   members: (token: string) =>
     get<{
       accountId: string;
       checkedAt: string;
       passes: PassInfo[];
       content: { creator: string; label: string; posts: { title: string; body: string }[] };
+      programme: { name: string; summary: string; benefits: string[]; tiers: { status: string; names: string[]; note: string } };
     }>("/members", token),
 };

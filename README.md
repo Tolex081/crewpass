@@ -8,6 +8,7 @@ withdraw and the page access go to the buyer in the same transaction, and the se
 - **Live site:** https://crewpass-steel.vercel.app (passes, pass history, members area, proof)
 - **Track:** `nfts` · **Network:** NEAR testnet · **License:** MIT
 - **Status:** Contract live on testnet at `crewpass.testnet`, tested locally (36 unit tests, 6 NEAR sandbox tests) and in a recorded live run. Front end not built yet.
+- **Product and architecture (master document):** [docs/PRODUCT.md](docs/PRODUCT.md): Living AI Membership, what is built, partial and planned
 - **Security design:** [THREAT_MODEL.md](THREAT_MODEL.md)
 - **House of Stake (TLA):** not used. Our investigation is **incomplete**: their transfer behaviour
   is known from reading their code, not from running their tests. Details in
