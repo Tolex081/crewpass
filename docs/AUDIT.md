@@ -114,7 +114,7 @@ Incoming NEAR sent to a pass account by others (not through the registry) is vis
 |---|---|
 | Landing, Discover, Programme, My passes, Pass, Events, Rewards, Members, Creator, Proof | met |
 | Real vs simulated distinguishable; no dead buttons | met: every button is a contract call or a gated API call; demo programme content is labelled; V1 is labelled as an archive |
-| Live deployment of the V2 site | **not yet**: the code is committed locally; Vercel deploys on push to GitHub |
+| Live deployment of the V2 site | met: https://crewpass-steel.vercel.app serves V2 (checked 2026-11-13: `/api/v2/config` reads `crewpass-v2.testnet`, pass #1 history complete with 34 transactions read) |
 
 ### §11 Implementation rules
 | Rule | Status |
@@ -137,12 +137,11 @@ Incoming NEAR sent to a pass account by others (not through the registry) is vis
 ## Open items (honest list)
 
 1. **Registry full-access key** still on `crewpass-v2.testnet` (U1). Remove it before any real use.
-2. **Site not redeployed** with V2 until the commit is pushed.
-3. **Cross-instance replay protection** depends on Upstash being configured on Vercel. It is used for companion memory there, but this audit did not inspect the Vercel settings.
-4. **Builds are not Docker-reproducible** (hashes recorded and matched).
-5. **Not yet built:**
+2. Cross-instance replay protection is active in production: the live companion reports durable (Upstash) storage, and the nonce store is built from the same Upstash settings.
+3. **Builds are not Docker-reproducible** (hashes recorded and matched).
+4. **Not yet built:**
    - campaigns with conditions and expiry;
    - NEP-199 royalties;
    - creator-editable content;
    - a private AI provider.
-6. **House of Stake:** the verification script is still incomplete. HoS is not used.
+5. **House of Stake:** the verification script is still incomplete. HoS is not used.
