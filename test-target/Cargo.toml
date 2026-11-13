@@ -1,0 +1,17 @@
+[package]
+name = "test-target"
+description = "Test-only contract for CrewPass V2 sandbox tests: a slow call chain, a failing method, and a hostile nft_transfer_call receiver. Never deployed."
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ['cfg(near)']

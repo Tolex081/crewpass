@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["contract", "test-receiver"]
+members = ["contract", "test-receiver", "pass-account", "contract-v2", "test-target"]
 
 [workspace.dependencies]
 near-sdk = "=5.30.1"
