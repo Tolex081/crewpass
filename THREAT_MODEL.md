@@ -126,3 +126,93 @@ from reading their code, not from executing it.
 - Making a seller forget what was on the members-only page.
 - That the members-only content can't be copied by someone who could see it while they held the pass.
 - Any connection to House of Stake. It runs on mainnet only. CrewPass follows its idea (control, access and value move with the token) in its own contract. See "House of Stake (TLA) investigation: INCOMPLETE" above.
+
+---
+
+# V2 threat model: pass accounts, revenue, tickets, tiers
+
+Written on 2026-11-12, **before** the V2 contracts, then updated with test results as each row was
+proven. The design is in [docs/ADR-001-pass-accounts.md](docs/ADR-001-pass-accounts.md). The V1 rows
+above still describe `crewpass.testnet`, which is unchanged.
+
+Unit tests: `contract-v2/src/tests.rs` (59) and `pass-account/src/lib.rs` (9). Sandbox tests (compiled
+wasm, real accounts, real global contract, nearcore 2.14): `contract-v2/tests/sandbox.rs` (11). Web tests:
+`web/server/*.test.ts` (43). Run with `scripts/test-v2.sh` and `npm test` in `web/`.
+
+**Live evidence on testnet:** [deploy/v2-live-run.md](deploy/v2-live-run.md) exercises A1, A2, A6 (listing),
+A8, A9, F1, F5, F8, R1v2 and R2v2 with real transactions (29 steps, 0 unexpected).
+[deploy/v2-web-check.md](deploy/v2-web-check.md) exercises P1–P4 with real NEP-413 sign-ins (12 checks,
+0 unexpected).
+
+**Found by the live check, fixed:** a ticket attached to a pass also kept opening the event for the buyer
+after they sold the pass (one seat, two people). The access route now honours an attached ticket only for
+the pass's current holder (P4).
+
+## What V2 adds
+
+- Every pass *N* has its own keyless NEAR account `N.<registry>` running shared, immutable code
+  (a global contract attached by hash). Only the registry can instruct it; the registry only obeys the
+  current NFT owner.
+- Programmes (any creator), paid events and tickets, a per-programme reward pool that accrues to every
+  pass and is paid into the pass accounts, a creator treasury.
+- On-chain engagement (check-ins, achievements, referrals) → points → Bronze, Silver, Gold, Platinum,
+  with NEP-171 `nft_metadata_update` events.
+- An ownership epoch per pass, used to scope private companion memory.
+
+## Rules V2 must keep
+
+- **V1.** The pass account acts only on instructions from the registry; the registry only issues them
+  for the current owner, checked in the receipt that accepts the request.
+- **V2.** No access key ever exists on a pass account.
+- **V3.** While an account operation, a sale listing or an `nft_transfer_call` is in progress, the pass
+  cannot change owner or start another account operation.
+- **V4.** Treasuries + reserved rewards + owed + listing deposits + pending mints, plus storage, never
+  exceed the registry's balance (`accounting().solvent`).
+- **V5.** Each unit of reward is credited once and paid once, only to the pass's own account.
+- **V6.** Tiers and metadata change only through contract logic.
+
+## Threats
+
+*(s)* = sandbox test; *(web)* = web server test; others are unit tests.
+
+| # | Threat | How it's blocked | Tests | Status |
+|---|---|---|---|---|
+| A1 | **Stolen or retained seller keys** operate the pass account after a sale | The account has no keys (V2). The seller's own wallet key only reaches the registry, which checks current ownership | `mint_creates_keyless_pass_account` *(s)*, `sale_moves_account_control_to_buyer` *(s)*, `old_owner_account_op_refused_after_sale` | proven |
+| A2 | **Account takeover**: someone calls the pass account directly | Pass-account code accepts only its parent (the registry) as caller | `pass_account_rejects_everyone_but_registry` *(s)* | proven |
+| A3 | **Unauthorised withdrawal** from a pass account | `account_transfer` / `account_call` require the current owner and 1 yoctoNEAR (full-access key) | `account_op_only_by_owner`, `account_op_requires_one_yocto` | proven |
+| A4 | **Failed account association** leaves an NFT without an account, or keeps the minter's money | The NFT is minted only in the success callback; on failure the minter is refunded and the seed is owed | `mint_success_mints_nft_and_links_account`, `mint_failure_refunds_and_owes_seed`, `failed_account_creation_refunds_minter` *(s)* | proven |
+| A5 | **Failed control transition** | No rotation step exists: control is the owner in the same receipt. Account operations in flight block transfers (V3) | `buy_moves_control_and_bumps_epoch`, `sale_moves_account_control_to_buyer` *(s)* | proven |
+| A6 | **Async race: sale during a pending account operation** (seller starts a withdrawal, then sells before it lands) | Operation lock from the request receipt until `on_account_op`; transfer, list, buy and transfer_call refused while locked | `transfer_refused_during_account_op`, `list_refused_during_account_op`, `second_account_op_refused`, `sale_refused_while_account_op_pending` *(s)* | proven |
+| A7 | **Lock never clears** (callback failure) | The callback runs on success and on failure; owner-only `clear_stale_lock` after `LOCK_TIMEOUT_BLOCKS` | `callback_clears_lock_on_failure`, `stale_lock_cleared_only_after_timeout_by_owner`, `failed_account_op_clears_lock` *(s)* | proven |
+| A8 | **Malicious `nft_transfer_call` receiver** uses the pass account while it briefly owns the pass | The transfer-call lock (V1 T9) now also blocks account operations | `transfer_call_lock_blocks_account_ops`, `malicious_receiver_cannot_use_pass_account` *(s, real attacker contract)* | proven |
+| A9 | **Pass frozen forever** by sending it to its own (or another) pass account | Mint, transfer, transfer_call and buy refuse any sub-account of the registry | `transfer_to_pass_account_refused`, `cannot_send_pass_to_a_pass_account` *(s)* | proven |
+| A10 | **Re-entrancy through the pass account** (the account calls back into the registry mid-operation) | The account is an ordinary caller to the registry, owns no pass (A9), and the lock is on the token | `pass_account_cannot_operate_its_own_token` | proven |
+| F1 | **Double claim of rewards** | Claim moves the pass's snapshot to the current index and lowers the reserved total before paying | `claim_rewards_pays_pass_account_once` | proven |
+| F2 | **Over-allocation**: the pool pays out more than it received | Integer share per pass = amount ÷ active passes; the remainder is carried, never created | `ticket_split_and_reward_index`, `reward_remainder_is_carried_not_lost` | proven |
+| F3 | **New members take past revenue** | A new pass starts at the current index | `new_pass_gets_no_past_revenue` | proven |
+| F4 | **Unauthorised treasury distribution or withdrawal** | Only the programme creator may fund the pool or withdraw the treasury, never more than it holds; reduce first, owe on failure | `fund_rewards_creator_only`, `withdraw_treasury_creator_only_and_bounded` | proven |
+| F5 | **Duplicate ticket purchase or check-in** | One ticket per (event, buyer) and per (event, pass); one check-in per ticket; capacity enforced | `duplicate_ticket_refused`, `capacity_enforced`, `double_check_in_refused` | proven |
+| F6 | **Rewards land with the wrong holder after a sale** | Rewards accrue to the token and are only ever paid to the pass's own account; unclaimed rewards move with the token | `rewards_follow_token_on_sale`, `ticket_revenue_reaches_pass_account` *(s)* | proven |
+| F7 | **Wrong amounts** (mint, ticket, sale) | Exact deposits required | `mint_requires_exact_price`, `ticket_requires_exact_price`, `buy_with_wrong_amount_refused` | proven |
+| F8 | **Stale listing swap**: seller delists, empties the account, relists at the same price before the buyer's transaction lands | `buy` names the `listing_id`; every listing gets a new id. While listed, nothing can leave the account | `buy_with_stale_listing_id_refused`, `account_op_refused_while_listed` | proven |
+| R1v2 | **Reward or tier manipulation** | Points come only from: creator check-in of a real ticket, a creator achievement (unique code, capped points), a successful referral mint. Self-referral refused | `check_in_requires_ticket_and_creator`, `achievement_unique_and_capped`, `self_referral_refused` | proven (Sybil referrals stay open) |
+| R2v2 | **Tier decided by the front end** | Tier is computed only in the contract from points; the site reads `pass_info` | `tier_thresholds_and_metadata_update`, `tier_upgrade_updates_metadata` *(s)* | proven |
+| S1 | **Storage exhaustion** | Whoever adds storage pays for it: programme and event creation, check-ins and achievements are measured and charged to the caller (excess refunded); passes and tickets are charged from the creator share; minimum prices enforced | `storage_is_charged_to_the_caller`, `accounting_solvent_after_flows`; solvency checked after every sandbox test | proven |
+| C11 | **Creator compromise** | A creator can only create events, check in, award capped achievements, fund the pool and withdraw their own treasury. No creator method touches pass accounts or other programmes | `creator_cannot_touch_other_programme`, `creator_cannot_operate_pass_account` | proven |
+| U1 | **Registry upgrade / admin key** | No upgrade or admin method in the code; pass-account code attached by immutable hash. **The registry's full-access key still exists during the hackathon** and could redeploy it, which would compromise every pass account if stolen | — | **open** (key removal planned after the final deploy) |
+| P1 | **Private memory leaks to the buyer, or back to a seller who buys the pass again** | Memory key = contract + token + **owner epoch** + account; the epoch increases on every ownership change | `companion memory is scoped to the ownership epoch` *(web)* | proven |
+| P2 | **Sign-in replay across server instances** | Nonces recorded in the shared store (Upstash) when configured | `a nonce used on one instance is refused on another` *(web)* | proven |
+| P3 | **A cached session outlives a sale** | Every gated request re-reads ownership on chain and fails closed | `old_owner_gets_403_after_sale`, `V2 access ends on the next request after a sale, even with a live session`, `V2 fails closed when the chain cannot be read` *(web)* | proven |
+| P4 | **A seller keeps event access through a ticket they attached to the pass** | An attached ticket opens the event only for the pass's current holder; a visitor ticket only for its buyer | `a ticket the seller bought for their pass opens the event only for the pass's current holder` *(web)*; live: [v2-web-check](deploy/v2-web-check.md) | proven |
+| P5 | **Higher-tier content leaks to lower tiers** | Server sends locked posts without their body; tier read from the chain | `members content is gated by the on-chain tier` *(web)* | proven |
+| P6 | **Non-creator opens a creator dashboard** | Session account must equal the programme's creator on chain | `creator dashboard is for the programme's creator only` *(web)* | proven |
+
+## V2 open risks
+
+- **U1**: the registry's full-access key (see the table).
+- **Lock timeout** (A7): if a callback failed and the owner cleared the lock early while a receipt was
+  still pending, that receipt could still run. NEAR receipts settle within a few blocks; the timeout is
+  far longer.
+- **Sybil referrals** (R4) as in V1.
+- **Creator trust**: check-ins and achievements are attested by the creator (achievement points capped).
+- **Not audited.**
