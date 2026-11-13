@@ -34,12 +34,19 @@ export function issueNonce(secret: Uint8Array, now = Date.now()): Uint8Array {
 
 export type NonceCheck = "ok" | "forged" | "expired" | "future" | "reused";
 
+/** Atomic "set if absent" in a store shared by every server instance (Upstash `SET NX EX`). */
+export interface UsedNonceStore {
+  /** True if the key was newly set, false if it already existed. */
+  setIfAbsent(key: string, ttlSeconds: number): Promise<boolean>;
+}
+
 export class NonceGuard {
   private used = new Map<string, number>(); // hex nonce -> expiry ms
 
-  constructor(private secret: Uint8Array) {}
+  /** With `shared`, a nonce used on one instance is refused on every other instance too. */
+  constructor(private secret: Uint8Array, private shared?: UsedNonceStore) {}
 
-  check(nonce: Uint8Array, now = Date.now()): NonceCheck {
+  async check(nonce: Uint8Array, now = Date.now()): Promise<NonceCheck> {
     if (nonce.length !== 32) return "forged";
     const head = nonce.slice(0, 16);
     if (!equal(nonce.slice(16), mac(this.secret, head).slice(0, 16))) return "forged";
@@ -49,6 +56,10 @@ export class NonceGuard {
     this.sweep(now);
     const key = Buffer.from(nonce).toString("hex");
     if (this.used.has(key)) return "reused";
+    if (this.shared) {
+      const ttl = Math.max(1, Math.ceil((issued + NONCE_TTL_MS - now) / 1000));
+      if (!(await this.shared.setIfAbsent(`nonce:${key}`, ttl))) return "reused";
+    }
     this.used.set(key, issued + NONCE_TTL_MS);
     return "ok";
   }

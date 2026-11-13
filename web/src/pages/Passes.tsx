@@ -116,7 +116,7 @@ export function PassesPage({ config }: { config: Config | null }) {
           {passes && (
             <div className="passes">
               {passes.map((p) => (
-                <PassCard key={p.token_id} pass={p} href={`#/pass/${p.token_id}`} />
+                <PassCard key={p.token_id} pass={p} href={`#/v1/pass/${p.token_id}`} />
               ))}
             </div>
           )}

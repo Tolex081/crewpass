@@ -3,9 +3,10 @@ import { Hono, type Context } from "hono";
 import type { Chain } from "./near.js";
 import { eventTouchesPass } from "./near.js";
 import { verifyNep413 } from "./nep413.js";
-import { issueNonce, issueSession, NonceGuard, readSession, type Session } from "./tokens.js";
+import { issueNonce, issueSession, NonceGuard, readSession, type Session, type UsedNonceStore } from "./tokens.js";
 import { programme as defaultProgramme, type Programme } from "./programme.js";
 import { memoryKey, type KvStore, type MemoryStore } from "./memory.js";
+import { mountV2 } from "./v2.js";
 import { contextBlock, MAX_INPUT_CHARS, ProviderError, RATE_LIMIT, systemPrompt, type PassFacts, type Provider } from "./companion.js";
 
 export const SIGN_IN_MESSAGE = "Sign in to CrewPass to open the members area. This does not move any funds.";
@@ -28,6 +29,10 @@ export interface AppOptions {
   programme?: Programme;
   /** Absent = companion switched off (routes answer 503). */
   companion?: CompanionDeps;
+  /** Store shared by all server instances; makes sign-in nonces single-use everywhere (P2). */
+  nonceStore?: UsedNonceStore;
+  /** CrewPass V2 registry. Absent = V2 routes answer 503. */
+  v2?: import("./v2.js").V2Options;
   now?: () => number;
 }
 
@@ -69,7 +74,7 @@ interface Token {
 
 export function createApp(o: AppOptions) {
   const now = o.now ?? Date.now;
-  const nonces = new NonceGuard(o.secret);
+  const nonces = new NonceGuard(o.secret, o.nonceStore);
   const prog = o.programme ?? defaultProgramme;
   const app = new Hono().basePath("/api");
 
@@ -116,7 +121,7 @@ export function createApp(o: AppOptions) {
     if (!verifyNep413(payload, publicKey, signature)) {
       return c.json({ error: "The signature does not match this sign-in request." }, 401);
     }
-    const nonceState = nonces.check(nonceBytes, now());
+    const nonceState = await nonces.check(nonceBytes, now());
     if (nonceState !== "ok") {
       const why = { forged: "was not issued by this site", expired: "has expired", future: "is not valid yet", reused: "was already used" }[nonceState];
       return c.json({ error: `This sign-in request ${why}. Start again.` }, 401);
@@ -263,12 +268,15 @@ export function createApp(o: AppOptions) {
   app.get("/passes/:id/history", async (c) => {
     const id = c.req.param("id");
     try {
-      const events = (await o.chain.recentEvents()).filter((e) => eventTouchesPass(e, id));
-      return c.json({ complete: true, events });
+      const page = o.chain.allEvents ? await o.chain.allEvents() : { events: await o.chain.recentEvents(), complete: false };
+      const events = page.events.filter((e) => eventTouchesPass(e, id));
+      return c.json(page.complete ? { complete: true, events } : { complete: false, events, note: "Only part of the history could be read; the counters above come straight from the contract." });
     } catch {
       return c.json({ complete: false, events: [], note: "Full history is temporarily unavailable; the counters above come straight from the contract." });
     }
   });
+
+  mountV2(app, { secret: o.secret, now, signedIn, v2: o.v2, companion: o.companion });
 
   return app;
 }

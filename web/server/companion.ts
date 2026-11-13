@@ -45,7 +45,7 @@ export function systemPrompt(p: Programme): string {
 }
 
 /** Quote untrusted content inside tags; neutralise any closing tag it contains. */
-function quoted(tag: string, value: unknown): string {
+export function quoted(tag: string, value: unknown): string {
   const body = JSON.stringify(value, null, 2).replaceAll(`</${tag}>`, `<\\/${tag}>`);
   return `<${tag}>\n${body}\n</${tag}>`;
 }

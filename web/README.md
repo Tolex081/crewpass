@@ -1,6 +1,31 @@
 # CrewPass web
 
-The site for CrewPass passes on NEAR testnet. Two layers:
+The site for CrewPass on NEAR testnet. **V2** (main site) reads the registry `crewpass-v2.testnet`, where every
+pass owns its own account. **V1** (`#/v1`, archive) reads `crewpass.testnet` and is described further down.
+
+## V2 routes (`server/v2.ts`)
+
+| Route | Who | What it decides or returns |
+|---|---|---|
+| `GET /api/v2/config`, `/programmes`, `/programmes/:id`, `/programmes/:id/rewards`, `/passes[?owner=]`, `/passes/:id`, `/passes/:id/history`, `/events[?programme=]` | everyone | public chain data; pass detail includes the account's balance, key count and code hash compared with the registry's |
+| `GET /api/v2/members/:id` | current holder of that pass | tier-gated content; locked posts are sent without their body |
+| `GET /api/v2/events/:id/access` | buyer of a visitor ticket, or current holder of a pass with an attached ticket | event access |
+| `GET /api/v2/creator/:programmeId` | the programme's creator on chain | dashboard data, check-ins waiting |
+| `GET/POST /api/v2/companion/:id`, `DELETE …/memory` | current holder (delete: any session, own memory, every epoch) | companion; memory keyed by token + owner epoch + account |
+
+Every gated route reads ownership fresh from the chain and answers 502 (never content) if the chain cannot
+be read. History pages through NearBlocks v3 with its `next_page` cursor (up to 20 × 100 transactions) and
+says `complete: false` if it could not read everything. Sign-in nonces are single-use across instances when
+Upstash is configured (`setIfAbsent`, Redis `SET NX EX`).
+
+Pages: `src/pages/` Landing, Discover, Programme, MyPasses, PassV2, Events, Rewards, MembersV2, Creator,
+Proof (V2 proof rows generated from `deploy/v2-live-run.md` by `scripts/proof-from-md.mjs`).
+`scripts/v2-web-check.ts` repeats the members/companion/event checks against the live registry with real
+sign-ins (output: `deploy/v2-web-check.md`).
+
+## V1 (archive)
+
+Two layers:
 
 - **Server** (`server/`, Hono on Node; runs on Vercel as functions). Everything that decides who may
   see members-only content runs here, never in the browser.

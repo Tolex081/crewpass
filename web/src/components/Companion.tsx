@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, type ChatMessage, type PassInfo } from "../lib/api";
+import { api, ApiError, type ChatMessage } from "../lib/api";
+import { v2 } from "../lib/v2";
 import { hueFor } from "../lib/format";
 
 type Info = Awaited<ReturnType<typeof api.companionInfo>>;
 
-const STARTERS = ["What should I study next?", "How much is in my pass vault?", "What happens to my chats if I sell my pass?"];
+const STARTERS_V1 = ["What should I study next?", "How much is in my pass vault?", "What happens to my chats if I sell my pass?"];
+const STARTERS_V2 = ["How far am I from the next tier?", "What is in my pass account?", "Which events can I join?"];
 
 /** Holder-only AI companion for one pass. Every request is re-checked against the chain by the server. */
-export function Companion({ token, passes, onLockedOut }: { token: string; passes: PassInfo[]; onLockedOut: (msg: string) => void }) {
+/** version picks the V1 (crewpass.testnet) or V2 (crewpass-v2.testnet) companion routes. */
+export function Companion({ token, passes, onLockedOut, version = "v1" }: { token: string; passes: { token_id: string }[]; onLockedOut: (msg: string) => void; version?: "v1" | "v2" }) {
+  const client = version === "v2"
+    ? { history: v2.companionHistory, send: v2.companionSend, clear: v2.companionClear }
+    : { history: api.companionHistory, send: api.companionSend, clear: api.companionClear };
+  const STARTERS = version === "v2" ? STARTERS_V2 : STARTERS_V1;
   const [info, setInfo] = useState<Info | null>(null);
   const [infoError, setInfoError] = useState("");
   const [passId, setPassId] = useState(passes[0]?.token_id ?? "");
@@ -31,7 +38,7 @@ export function Companion({ token, passes, onLockedOut }: { token: string; passe
     if (!passId) return;
     setError("");
     setConfirmClear(false);
-    api.companionHistory(token, passId).then((r) => setHistory(r.history)).catch(handle);
+    client.history(token, passId).then((r) => setHistory(r.history)).catch(handle);
   }, [passId, token]);
 
   useEffect(() => {
@@ -46,7 +53,7 @@ export function Companion({ token, passes, onLockedOut }: { token: string; passe
     setHistory((h) => [...h, { role: "user", content: message, at: Date.now() }]);
     setDraft("");
     try {
-      const reply = await api.companionSend(token, passId, message);
+      const reply = await client.send(token, passId, message);
       setHistory((h) => [...h, { role: "assistant", content: reply, at: Date.now() }]);
     } catch (e) {
       setHistory((h) => h.slice(0, -1)); // the server saved nothing, so neither do we
@@ -59,7 +66,7 @@ export function Companion({ token, passes, onLockedOut }: { token: string; passe
 
   async function clear() {
     try {
-      await api.companionClear(token, passId);
+      await client.clear(token, passId);
       setHistory([]);
       setConfirmClear(false);
     } catch (e) {
@@ -92,7 +99,7 @@ export function Companion({ token, passes, onLockedOut }: { token: string; passe
       <div className="chat" role="log" aria-live="polite">
         {history.length === 0 && !busy && (
           <div className="chat-empty">
-            <p>Ask about lessons, sessions, your pass vault or what happens if you sell. It only knows the programme notes, your pass's live state and what you tell it here.</p>
+            <p>{version === "v2" ? "Ask about your tier, your pass account, rewards, events or what happens if you sell." : "Ask about lessons, sessions, your pass vault or what happens if you sell."} It only knows the programme notes, your pass's live state and what you tell it here.</p>
             <div className="row">
               {STARTERS.map((s) => (
                 <button key={s} className="quiet starter" onClick={() => send(s)}>{s}</button>

@@ -7,7 +7,31 @@ export interface Chain {
   view<T>(method: string, args: object, opts?: { fresh?: boolean }): Promise<T>;
   /** CrewPass events from the contract's recent transactions, newest first. */
   recentEvents(): Promise<ChainEvent[]>;
+  /** Every page of the contract's transactions (up to a cap). `complete` is false if the cap was
+   *  reached or a page could not be read. Optional: V1-only chains may not implement it. */
+  allEvents?(): Promise<EventPage>;
+  /** A plain NEAR account as the chain sees it (balance, code, number of access keys). */
+  account?(accountId: string): Promise<AccountState | null>;
 }
+
+export interface EventPage {
+  events: ChainEvent[];
+  complete: boolean;
+  transactionsRead: number;
+  pagesRead: number;
+}
+
+export interface AccountState {
+  accountId: string;
+  balance: string; // yoctoNEAR
+  storageUsage: number;
+  /** Base58 hash of the global contract the account runs, if any. */
+  globalContractHash: string | null;
+  accessKeys: number;
+}
+
+/** Upper bound on NearBlocks pages read for one history (100 transactions each). */
+export const MAX_HISTORY_PAGES = 20;
 
 export interface ChainEvent {
   txHash: string;
@@ -74,7 +98,7 @@ async function rpcOnce<T>(url: string, method: string, params: unknown): Promise
 const VIEW_CACHE_MS = 4_000;
 
 export function nearChain(cfg: ChainConfig): Chain {
-  let cache: { at: number; events: ChainEvent[] } | null = null;
+  let cache: { at: number; page: EventPage } | null = null;
   const views = new Map<string, { at: number; value: Promise<unknown> }>();
 
   return {
@@ -111,22 +135,47 @@ export function nearChain(cfg: ChainConfig): Chain {
     },
 
     async recentEvents() {
-      if (cache && Date.now() - cache.at < 30_000) return cache.events;
-      const list = await fetch(`${cfg.nearblocksUrl}/v3/accounts/${cfg.contract}/txns`, {
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!list.ok) throw new Error(`NearBlocks ${list.status}`);
-      const txns = ((await list.json()) as {
-        data?: { transaction_hash: string; signer_account_id: string; block_timestamp: string; receiver_account_id: string }[];
-      }).data ?? [];
+      return (await this.allEvents!()).events;
+    },
+
+    async allEvents() {
+      if (cache && Date.now() - cache.at < 30_000) return cache.page;
+      type Tx = { transaction_hash: string; signer_account_id: string; block_timestamp: string; receiver_account_id: string };
+      const txns: Tx[] = [];
+      let next: string | undefined;
+      let pagesRead = 0;
+      let complete = false;
+      // NearBlocks v3 pages newest-first with `limit` (max 100) and an opaque `meta.next_page` cursor.
+      while (pagesRead < MAX_HISTORY_PAGES) {
+        const url = new URL(`${cfg.nearblocksUrl}/v3/accounts/${cfg.contract}/txns`);
+        url.searchParams.set("limit", "100");
+        if (next) url.searchParams.set("next", next);
+        const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        if (!res.ok) {
+          if (pagesRead === 0) throw new Error(`NearBlocks ${res.status}`);
+          break; // keep what we have; marked incomplete
+        }
+        const body = (await res.json()) as { data?: Tx[]; meta?: { next_page?: string } };
+        txns.push(...(body.data ?? []));
+        pagesRead += 1;
+        next = body.meta?.next_page;
+        if (!next) {
+          complete = true;
+          break;
+        }
+      }
       const events: ChainEvent[] = [];
+      let unreadable = 0;
       for (const tx of txns.filter((t) => t.receiver_account_id === cfg.contract)) {
         const status = await rpc<{ receipts_outcome: { outcome: { executor_id: string; logs: string[] } }[] }>(
           cfg.rpcUrls,
           "EXPERIMENTAL_tx_status",
           { tx_hash: tx.transaction_hash, sender_account_id: tx.signer_account_id, wait_until: "FINAL" },
         ).catch(() => null);
-        if (!status) continue;
+        if (!status) {
+          unreadable += 1;
+          continue;
+        }
         for (const r of status.receipts_outcome) {
           if (r.outcome.executor_id !== cfg.contract) continue;
           for (const log of r.outcome.logs) {
@@ -149,8 +198,35 @@ export function nearChain(cfg: ChainConfig): Chain {
           }
         }
       }
-      cache = { at: Date.now(), events };
-      return events;
+      const page: EventPage = { events, complete: complete && unreadable === 0, transactionsRead: txns.length, pagesRead };
+      cache = { at: Date.now(), page };
+      return page;
+    },
+
+    async account(accountId) {
+      try {
+        const a = await rpc<{ amount: string; storage_usage: number; global_contract_hash?: string | null }>(cfg.rpcUrls, "query", {
+          request_type: "view_account",
+          finality: "final",
+          account_id: accountId,
+        });
+        const keys = await rpc<{ keys: unknown[] }>(cfg.rpcUrls, "query", {
+          request_type: "view_access_key_list",
+          finality: "final",
+          account_id: accountId,
+        });
+        return {
+          accountId,
+          balance: a.amount,
+          storageUsage: a.storage_usage,
+          globalContractHash: a.global_contract_hash ?? null,
+          accessKeys: keys.keys.length,
+        };
+      } catch (e) {
+        const name = (e as { cause_name?: string }).cause_name ?? (e as Error).message;
+        if (/UNKNOWN_ACCOUNT|does not exist/i.test(name)) return null;
+        throw e;
+      }
     },
   };
 }

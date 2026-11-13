@@ -93,7 +93,7 @@ export function PassPage({ id, config }: { id: string; config: Config | null }) 
 
   const mine = wallet.accountId === pass.owner_id;
   const listed = pass.listing;
-  const refLink = `${window.location.origin}/?ref=${pass.token_id}`;
+  const refLink = `${window.location.origin}/?ref=${pass.token_id}#/v1`;
   const lines = (history?.events ?? [])
     .map((e) => ({ e, line: describe(e, id) }))
     .filter((x): x is { e: HistoryEvent; line: Line } => x.line !== null);
@@ -110,7 +110,7 @@ export function PassPage({ id, config }: { id: string; config: Config | null }) 
 
   return (
     <>
-      <p><a href="#/">← All passes</a></p>
+      <p><a href="#/v1">← All V1 passes</a></p>
       <section className="split">
         <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
           <PassCard pass={pass} big />

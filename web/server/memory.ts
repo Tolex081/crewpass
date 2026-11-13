@@ -15,10 +15,6 @@ export interface MemoryRecord {
 export const MAX_MESSAGES = 20;
 export const MEMORY_TTL_SECONDS = 90 * 24 * 60 * 60;
 
-export function memoryKey(contract: string, tokenId: string, accountId: string): string {
-  return `mem:v1:${contract}:${tokenId}:${accountId}`;
-}
-
 /** Raw key-value store. Values are already encrypted when they get here. */
 export interface KvStore {
   get(key: string): Promise<string | null>;
@@ -26,6 +22,19 @@ export interface KvStore {
   del(key: string): Promise<void>;
   /** Increment a counter that expires `windowSeconds` after its first hit; returns the new count. */
   incr(key: string, windowSeconds: number): Promise<number>;
+  /** Atomic set-if-absent with expiry. True if newly set. Used for single-use sign-in nonces. */
+  setIfAbsent(key: string, ttlSeconds: number): Promise<boolean>;
+}
+
+/** V1 memory key (V1 contract). */
+export function memoryKey(contract: string, tokenId: string, accountId: string): string {
+  return `mem:v1:${contract}:${tokenId}:${accountId}`;
+}
+
+/** V2 memory key: scoped to the pass's ownership epoch, so a holder who sells and later buys the
+ *  same pass back does not get their old conversation back, and a buyer never sees a seller's. */
+export function memoryKeyV2(contract: string, tokenId: string, ownerEpoch: number, accountId: string): string {
+  return `mem:v2:${contract}:${tokenId}:${ownerEpoch}:${accountId}`;
 }
 
 export class InMemoryKv implements KvStore {
@@ -53,6 +62,11 @@ export class InMemoryKv implements KvStore {
     const n = (cur ? Number(cur.value) : 0) + 1;
     this.data.set(key, { value: String(n), exp: cur?.exp ?? this.now() + windowSeconds * 1000 });
     return n;
+  }
+  async setIfAbsent(key: string, ttlSeconds: number) {
+    if (this.live(key)) return false;
+    this.data.set(key, { value: "1", exp: this.now() + ttlSeconds * 1000 });
+    return true;
   }
   /** Test helper: the raw stored value, to prove it is encrypted. */
   raw(key: string) {
@@ -97,6 +111,10 @@ export class UpstashKv implements KvStore {
     const counted = out[1];
     if (!counted || counted.error) throw new Error(`Upstash error: ${counted?.error ?? "no result"}`);
     return Number(counted.result);
+  }
+  async setIfAbsent(key: string, ttlSeconds: number) {
+    // Redis SET ... NX answers "OK" when it set the key and null when the key already existed.
+    return (await this.send<{ result: string | null }>(["SET", key, "1", "EX", ttlSeconds, "NX"])).result === "OK";
   }
 }
 

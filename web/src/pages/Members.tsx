@@ -119,7 +119,7 @@ export function MembersPage() {
             <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
               <h2>Your passes</h2>
               <div className="passes">
-                {data.passes.map((p) => <PassCard key={p.token_id} pass={p} href={`#/pass/${p.token_id}`} />)}
+                {data.passes.map((p) => <PassCard key={p.token_id} pass={p} href={`#/v1/pass/${p.token_id}`} />)}
               </div>
               <p className="muted">
                 Total in your vaults: Ⓝ {near(data.passes.reduce((s, p) => s + BigInt(p.vault), 0n))}
