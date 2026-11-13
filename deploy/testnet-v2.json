@@ -9,7 +9,7 @@
   },
   "registry_code": { "wasm_sha256": "e77ca695e36d844f35c273f93012036db949702d2aa093417ec138d8fd0e5853", "wasm_bytes": 354180 },
   "test_target": "crewpass-v2-target.testnet (test-only: slow chain, failing call, hostile nft_transfer_call receiver)",
-  "source_commit": "b28209b+uncommitted",
+  "source_commit": "2e49f25 (deployed before this commit existed; the sha256 of both wasm files built from 2e49f25 matches the deployed code)",
   "deployed_at": "2026-11-13T08:36:39Z",
   "build": "cargo near build non-reproducible-wasm (rust 1.95.0, cargo-near 0.23.0, near-sdk 5.30.1)",
   "registry_full_access_key": "present (kept for fixes during the hackathon; THREAT_MODEL U1)",
