@@ -5,13 +5,20 @@ import { KeyPair, KeyPairSigner } from "near-api-js";
 import { createApp, SIGN_IN_MESSAGE, type CompanionDeps } from "./app.js";
 import type { Chain } from "./near.js";
 import { InMemoryKv, MemoryStore, memoryKey, open, seal } from "./memory.js";
-import { contextBlock, OfflineProvider, OpenAICompatProvider, ProviderError, RATE_LIMIT, systemPrompt, type Provider } from "./companion.js";
+import { contextBlock, NearAiTeeProvider, OfflineProvider, OpenAICompatProvider, ProviderError, providerFromEnv, RATE_LIMIT, systemPrompt, type Provider } from "./companion.js";
 import { programme } from "./programme.js";
 
 const RECIPIENT = "crewpass.app";
 const CONTRACT = "crewpass.testnet";
 const secret = new TextEncoder().encode("test-secret-test-secret-test-secret");
 const encKey = Buffer.alloc(32, 7);
+
+test("provider configuration selects verified TEE and stays offline without required settings", () => {
+  assert.ok(providerFromEnv({ AI_PROVIDER: "nearai-tee", NEARAI_API_KEY: "test-key", AI_MODEL: "test/model" }) instanceof NearAiTeeProvider);
+  assert.ok(providerFromEnv({ AI_PROVIDER: "nearai-tee", NEARAI_API_KEY: "test-key" }) instanceof OfflineProvider);
+  assert.ok(providerFromEnv({ AI_PROVIDER: "nearai-tee", NEARAI_API_KEY: "test-key", AI_MODEL: "test/model", NEARAI_BASE_URL: "http://example.test" }) instanceof OfflineProvider);
+  assert.ok(providerFromEnv({ AI_PROVIDER: "openai-compatible", AI_BASE_URL: "https://example.test", AI_API_KEY: "key", AI_MODEL: "model" }) instanceof OpenAICompatProvider);
+});
 
 function fakeChain() {
   const owners = new Map<string, string>([

@@ -1,0 +1,47 @@
+{
+  "date": "2026-11-14",
+  "network": "testnet",
+  "registry": "crewpass-v2.testnet",
+  "transaction": "45sh96fh2bo1pShcnYv5vXif9zeggkVMWFXxoZkHvT8Q",
+  "source_commit": "2e49f25 + working-tree changes (not committed)",
+  "builder": "cargo-near 0.23.0, rustc 1.95.0, near-sdk 5.30.1; WSL test-v2.sh build",
+  "previous_registry_sha256": "e77ca695e36d844f35c273f93012036db949702d2aa093417ec138d8fd0e5853",
+  "deployed_registry": {
+    "path": "/home/tolex081/.cache/crewpass-target/near/crewpass_v2/crewpass_v2.wasm",
+    "sha256": "72a927f57e867289194de1972ad4804da72bb66ca5624b227540dfd97db47e05",
+    "bytes": 420215
+  },
+  "pass_account_code_hash_preserved": "CuX7PYtWMa9ZG18jkHGTYKutgQVQoKNWiQSFvmmzEzRL",
+  "registry_access_keys": "one full-access key remains",
+  "post_upgrade_config": {
+    "next_event_id": 2,
+    "next_programme_id": 2,
+    "next_token_id": 3,
+    "creator_royalty_bps": 500,
+    "campaign_claim_storage_bytes": 512,
+    "storage_byte_cost_yocto": "10000000000000000000"
+  },
+  "post_upgrade_accounting": {
+    "solvent": true,
+    "balance_yocto": "17879400745716589000000005",
+    "liabilities_yocto": "212630000000000000000000",
+    "storage_cost_yocto": "4244990000000000000000000"
+  },
+  "read_only_regression_checks": {
+    "programme_1": "read successfully; existing Study Crew data and counters retained",
+    "nft_tokens_1_2": "both existing tokens and owners read successfully",
+    "reward_campaigns_programme_1": "empty list returned",
+    "programme_content_1": "null returned"
+  },
+  "verification": {
+    "contract_unit_tests": "64 registry and 9 pass-account passed",
+    "sandbox_tests": "11 passed",
+    "web_tests": "46 passed",
+    "typescript_check": "passed",
+    "web_production_build": "passed",
+    "wasm_target_check": "passed",
+    "rust_format_check": "passed",
+    "docker_reproducible_build": "not run; requires clean committed checkout",
+    "live_tee_provider": "not verified; provider credentials/runtime are not configured"
+  }
+}

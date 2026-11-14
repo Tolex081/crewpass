@@ -1,0 +1,47 @@
+{
+  "network": "testnet only",
+  "registry": "crewpass-v2.testnet",
+  "deployed": true,
+  "built_at": "2026-11-14",
+  "source_commit": "2e49f25 + working-tree changes",
+  "builder": "cargo-near 0.23.0, rustc 1.95.0, near-sdk 5.30.1; WSL test-v2.sh build",
+  "artifacts": {
+    "pass_account": {
+      "path": "/home/tolex081/.cache/crewpass-target/near/pass_account/pass_account.wasm",
+      "sha256": "00078cd1048d190fabfc3110a840a25397afc19a9c4bf07745b3bdbc1aa6740d",
+      "bytes": 43682
+    },
+    "registry": {
+      "path": "/home/tolex081/.cache/crewpass-target/near/crewpass_v2/crewpass_v2.wasm",
+      "sha256": "72a927f57e867289194de1972ad4804da72bb66ca5624b227540dfd97db47e05",
+      "bytes": 420215
+    },
+    "test_target": {
+      "path": "/home/tolex081/.cache/crewpass-target/near/test_target/test_target.wasm",
+      "sha256": "3407c6195f54130f1f4640a8522f7930fd05380ada6a2b1ac8701da24d2a6186",
+      "bytes": 132603
+    }
+  },
+  "upgrade_plan": "Upgrade the existing registry only, without initialization. Keep the deployed pass-account global hash in existing contract state; do not publish the candidate pass-account binary as part of this registry upgrade.",
+  "testnet_upgrade": {
+    "transaction": "45sh96fh2bo1pShcnYv5vXif9zeggkVMWFXxoZkHvT8Q",
+    "previous_registry_sha256": "e77ca695e36d844f35c273f93012036db949702d2aa093417ec138d8fd0e5853",
+    "pass_account_code_hash_preserved": "CuX7PYtWMa9ZG18jkHGTYKutgQVQoKNWiQSFvmmzEzRL",
+    "state_preserved": "programme, pass and event counters retained; programme 1 and NFT tokens 1-2 still readable",
+    "accounting": "solvent; liabilities unchanged; updated storage reserve recorded",
+    "campaigns": "empty list returned for existing programme 1",
+    "creator_content": "null for existing programme 1"
+  },
+  "verification": {
+    "web_tests": "46 passed",
+    "web_production_build": "passed",
+    "typescript_check": "passed",
+    "registry_wasm_target_check": "passed",
+    "rust_format_check_for_v2": "passed",
+    "full_rust_unit_tests": "passed: 64 registry, 9 pass-account",
+    "sandbox_tests": "passed: 11",
+    "docker_reproducible_build": "not run: requires a clean committed checkout",
+    "live_tee_provider": "not verified: provider credentials/runtime are not configured"
+  },
+  "dependency_review": "Hono patched within the same major versions. npm audit reports three low-severity paths through elliptic in the NEAR AI DCAP verifier, with no upstream fixed version; the server uses the SDK Node entrypoint and Node's built-in crypto verifier. Recheck upstream before enabling TEE mode in production."
+}

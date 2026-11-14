@@ -11,6 +11,8 @@ const GENERIC_NOTICE =
   "Your messages are sent to this site's AI provider to write a reply. Do not share personal or sensitive information. Your history is stored encrypted and only you can read it here.";
 const OFFLINE_NOTICE =
   "No AI model is configured, so answers come from the programme notes. Your messages are stored encrypted and only you can read them here.";
+const TEE_NOTICE =
+  "Your message is sent through an encrypted connection to a model whose confidential execution and reply signature are verified before the answer is shown. CrewPass does not store unverified replies. Your chat history is stored encrypted by this site.";
 
 export interface CompanionSetup {
   deps?: CompanionDeps;
@@ -36,11 +38,12 @@ export function companionFromEnv(env: NodeJS.ProcessEnv, allowEphemeralKey: bool
   const { kv, durable } = kvFromEnv(env);
   if (!durable) notes.push("No Upstash configured: companion memory and rate limits live in this process only.");
   const provider = providerFromEnv(env);
-  if (provider.mode === "offline") notes.push("No AI_BASE_URL/AI_API_KEY/AI_MODEL: companion runs in offline mode.");
+  if (provider.mode === "offline" && env.AI_PROVIDER !== "nearai-tee") notes.push("No AI_BASE_URL/AI_API_KEY/AI_MODEL: companion runs in offline mode.");
+  if (env.AI_PROVIDER === "nearai-tee" && provider.mode === "offline") notes.push("Verified TEE companion is offline: configure NEARAI_API_KEY and AI_MODEL, and use an HTTPS NEARAI_BASE_URL if overriding the default.");
 
   const isGemini = (env.AI_BASE_URL ?? "").includes("generativelanguage.googleapis.com");
   const dataNotice =
-    env.AI_DATA_NOTICE ?? (provider.mode === "offline" ? OFFLINE_NOTICE : isGemini ? GEMINI_FREE_NOTICE : GENERIC_NOTICE);
+    env.AI_DATA_NOTICE ?? (env.AI_PROVIDER === "nearai-tee" && provider.mode !== "offline" ? TEE_NOTICE : provider.mode === "offline" ? OFFLINE_NOTICE : isGemini ? GEMINI_FREE_NOTICE : GENERIC_NOTICE);
 
   return { deps: { kv, memory: new MemoryStore(kv, key), provider, durable, dataNotice }, notes };
 }

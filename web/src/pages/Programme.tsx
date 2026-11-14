@@ -78,9 +78,11 @@ export function ProgrammePage({ id, config }: { id: string; config: ConfigV2 | n
               <dt>Mint price</dt><dd>Ⓝ {near(p.mint_price)}</dd>
               <dt>Seed into the new pass account</dt><dd>Ⓝ {near(config?.account_seed ?? "0")}</dd>
               <dt>Referral, paid to the referrer pass's account</dt><dd>{p.referral_bps / 100}%</dd>
+              <dt>Creator resale royalty</dt><dd>{(config?.creator_royalty_bps ?? 500) / 100}%</dd>
               <dt>Share of each ticket to all passes</dt><dd>{p.member_share_bps / 100}%</dd>
               <dt>Supply</dt><dd>{p.max_supply ? `${p.minted} of ${p.max_supply}` : `${p.minted}, no cap`}</dd>
             </dl>
+            <p className="muted" style={{ fontSize: "var(--step--1)" }}>CrewPass sales apply this royalty directly. Other marketplaces can honor it through the NEP-199 payout interface.</p>
           </div>
 
           <div className="panel">

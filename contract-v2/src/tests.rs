@@ -70,12 +70,27 @@ fn setup() -> Registry {
     let mut r = Registry::new(Base58CryptoHash::from([7u8; 32]));
     call_as(&creator(), NEAR);
     // 0.1 NEAR mint, 10% referral, 50% of tickets to members.
-    assert_eq!(r.create_programme("Study Crew".into(), "demo".into(), U128(PRICE), 1_000, 5_000, None), 1);
+    assert_eq!(
+        r.create_programme(
+            "Study Crew".into(),
+            "demo".into(),
+            U128(PRICE),
+            1_000,
+            5_000,
+            None
+        ),
+        1
+    );
     r
 }
 
 /// Mint and complete the account callback with the given result.
-fn mint_with(r: &mut Registry, who: &AccountId, referrer: Option<&str>, result: PromiseResult) -> TokenId {
+fn mint_with(
+    r: &mut Registry,
+    who: &AccountId,
+    referrer: Option<&str>,
+    result: PromiseResult,
+) -> TokenId {
     call_as(who, PRICE);
     let id = r.config().next_token_id.0.to_string();
     let _ = r.mint(1, referrer.map(str::to_string));
@@ -118,7 +133,14 @@ fn buy(r: &mut Registry, who: &AccountId, token: &str, listing: U64, price: u128
 
 fn event(r: &mut Registry, points: u32, capacity: u32) -> u64 {
     call_as(&creator(), NEAR / 10);
-    r.create_event(1, "Live session".into(), U128(TICKET), capacity, points, U64(0))
+    r.create_event(
+        1,
+        "Live session".into(),
+        U128(TICKET),
+        capacity,
+        points,
+        U64(0),
+    )
 }
 
 fn ticket(r: &mut Registry, who: &AccountId, event_id: u64, token: Option<&str>) {
@@ -140,7 +162,10 @@ fn mint_reserves_token_and_sends_account_batch() {
     call_as(&alice(), PRICE);
     let _ = r.mint(1, None);
     assert!(r.pending_mint("1".into()).is_some());
-    assert!(r.nft_token("1".into()).is_none(), "no NFT before the account exists");
+    assert!(
+        r.nft_token("1".into()).is_none(),
+        "no NFT before the account exists"
+    );
     assert_eq!(r.accounting().pending_mints.0, PRICE - ACCOUNT_SEED);
 }
 
@@ -274,7 +299,14 @@ fn account_call_gas_is_capped() {
     let mut r = setup();
     mint(&mut r, &alice(), None);
     call_as(&alice(), ONE_YOCTO);
-    let _ = r.account_call("1".into(), bob(), "m".into(), Base64VecU8(vec![]), U128(0), U64(Gas::from_tgas(200).as_gas()));
+    let _ = r.account_call(
+        "1".into(),
+        bob(),
+        "m".into(),
+        Base64VecU8(vec![]),
+        U128(0),
+        U64(Gas::from_tgas(200).as_gas()),
+    );
 }
 
 #[test]
@@ -344,10 +376,14 @@ fn stale_lock_cleared_only_after_timeout_by_owner() {
     mint(&mut r, &alice(), None);
     start_withdraw(&mut r, &alice(), "1", 5); // locked at block 100
     call_at(&alice(), 0, 100 + LOCK_TIMEOUT_BLOCKS - 1);
-    let early = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.clear_stale_lock("1".into())));
+    let early = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        r.clear_stale_lock("1".into())
+    }));
     assert!(early.is_err(), "cleared before the timeout");
     call_at(&bob(), 0, 100 + LOCK_TIMEOUT_BLOCKS);
-    let stranger = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.clear_stale_lock("1".into())));
+    let stranger = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        r.clear_stale_lock("1".into())
+    }));
     assert!(stranger.is_err(), "stranger cleared the lock");
     call_at(&alice(), 0, 100 + LOCK_TIMEOUT_BLOCKS);
     r.clear_stale_lock("1".into());
@@ -407,7 +443,14 @@ fn old_owner_account_call_refused_after_sale() {
     let l = list(&mut r, &alice(), "1", NEAR);
     buy(&mut r, &carol(), "1", l, NEAR);
     call_as(&alice(), ONE_YOCTO);
-    let _ = r.account_call("1".into(), bob(), "m".into(), Base64VecU8(vec![]), U128(0), U64(1));
+    let _ = r.account_call(
+        "1".into(),
+        bob(),
+        "m".into(),
+        Base64VecU8(vec![]),
+        U128(0),
+        U64(1),
+    );
 }
 
 #[test]
@@ -533,7 +576,10 @@ fn ticket_split_and_reward_index() {
     let member_share = TICKET / 2;
     assert_eq!(p.reward_index.0, member_share / 2);
     assert_eq!(p.reserved.0, member_share);
-    assert!(p.treasury.0 > before && p.treasury.0 < before + TICKET / 2, "treasury gets creator part minus storage");
+    assert!(
+        p.treasury.0 > before && p.treasury.0 < before + TICKET / 2,
+        "treasury gets creator part minus storage"
+    );
     assert_eq!(info(&r, "1").rewards_available.0, member_share / 2);
     assert_eq!(info(&r, "2").rewards_available.0, member_share / 2);
     assert_solvent(&r);
@@ -610,7 +656,11 @@ fn rewards_follow_token_on_sale() {
     r.fund_rewards(1);
     let l = list(&mut r, &alice(), "1", NEAR);
     buy(&mut r, &carol(), "1", l, NEAR);
-    assert_eq!(info(&r, "1").rewards_available.0, NEAR, "unclaimed rewards moved with the pass");
+    assert_eq!(
+        info(&r, "1").rewards_available.0,
+        NEAR,
+        "unclaimed rewards moved with the pass"
+    );
 }
 
 #[test]
@@ -643,7 +693,11 @@ fn withdraw_treasury_creator_only_and_bounded() {
     assert_eq!(r.programme(1).unwrap().treasury.0, 0);
     callback_with(PromiseResult::Failed);
     r.on_payout(creator(), U128(treasury), "treasury".into());
-    assert_eq!(r.owed_to(creator()).0, treasury, "failed payout is owed, not returned to the treasury");
+    assert_eq!(
+        r.owed_to(creator()).0,
+        treasury,
+        "failed payout is owed, not returned to the treasury"
+    );
     assert_solvent(&r);
 }
 
@@ -769,7 +823,9 @@ fn tier_thresholds_and_metadata_update() {
     call_as(&creator(), NEAR / 100);
     r.check_in(e, "1".into());
     let logs = get_logs().join("\n");
-    assert!(logs.contains("\"standard\":\"nep171\",\"version\":\"1.2.0\",\"event\":\"nft_metadata_update\""));
+    assert!(logs.contains(
+        "\"standard\":\"nep171\",\"version\":\"1.2.0\",\"event\":\"nft_metadata_update\""
+    ));
     assert!(logs.contains("tier_changed"));
     call_as(&creator(), NEAR / 100);
     r.award_achievement("1".into(), "speaker".into(), 40);
@@ -792,7 +848,10 @@ fn progression_moves_with_the_pass() {
     let l = list(&mut r, &alice(), "1", NEAR);
     buy(&mut r, &carol(), "1", l, NEAR);
     let i = info(&r, "1");
-    assert_eq!((i.owner_id, i.tier.as_str(), i.points), (carol(), "Silver", 40));
+    assert_eq!(
+        (i.owner_id, i.tier.as_str(), i.points),
+        (carol(), "Silver", 40)
+    );
 }
 
 // ------------------------------------------------------------------------------------- creator limits (C11), storage (S1)
@@ -839,5 +898,169 @@ fn accounting_solvent_after_flows() {
     let a = r.accounting();
     assert!(a.solvent);
     assert_eq!(a.listing_deposits.0, 0);
-    assert_eq!(a.liabilities.0, a.treasury.0 + a.reserved.0 + a.carry.0 + a.owed.0 + a.listing_deposits.0 + a.pending_mints.0);
+    assert_eq!(
+        a.liabilities.0,
+        a.treasury.0
+            + a.reserved.0
+            + a.carry.0
+            + a.owed.0
+            + a.listing_deposits.0
+            + a.pending_mints.0
+    );
+}
+
+#[test]
+fn creator_content_is_persisted_and_creator_only() {
+    let mut r = setup();
+    let content = ProgrammeContent {
+        label: "Member space".into(),
+        summary: "Useful member content".into(),
+        companion_name: "Guide".into(),
+        companion_tone: "Plain and practical".into(),
+        benefits: vec![ContentBenefit {
+            text: "Lessons".into(),
+            min_tier: 0,
+        }],
+        posts: vec![ContentPost {
+            title: "Start here".into(),
+            body: "Lesson one".into(),
+            min_tier: 1,
+        }],
+        knowledge: vec![ContentKnowledge {
+            title: "Course".into(),
+            body: "Build a project".into(),
+        }],
+    };
+    call_as(&creator(), NEAR / 10);
+    r.set_programme_content(1, content.clone());
+    assert_eq!(r.programme_content(1), Some(content));
+    let stranger = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        call_as(&alice(), NEAR / 10);
+        r.set_programme_content(
+            1,
+            ProgrammeContent {
+                label: "hack".into(),
+                summary: "".into(),
+                companion_name: "x".into(),
+                companion_tone: "".into(),
+                benefits: vec![],
+                posts: vec![],
+                knowledge: vec![],
+            },
+        );
+    }));
+    assert!(stranger.is_err());
+}
+
+#[test]
+fn campaign_is_tier_gated_one_time_and_accounted() {
+    let mut r = setup();
+    mint(&mut r, &alice(), None);
+    call_as(&creator(), NEAR);
+    let campaign = r.create_reward_campaign(
+        1,
+        "Welcome grant".into(),
+        U128(NEAR / 100),
+        1,
+        1,
+        U64(0),
+        U64(1_000_000),
+    );
+    assert_eq!(campaign.0, 1);
+    assert!(r.accounting().solvent);
+    let gated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        call_as(&bob(), 0);
+        let _ = r.claim_campaign(1, campaign, "1".into());
+    }));
+    assert!(gated.is_err());
+    call_as(&creator(), NEAR / 10);
+    r.award_achievement("1".into(), "silver-member".into(), 30);
+    call_as(&bob(), 0);
+    let _ = r.claim_campaign(1, campaign, "1".into());
+    assert!(r.has_claimed_campaign(1, campaign, "1".into()));
+    assert_eq!(r.reward_campaign(1, campaign).unwrap().claimed, 1);
+    let duplicate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        call_as(&bob(), 0);
+        let _ = r.claim_campaign(1, campaign, "1".into());
+    }));
+    assert!(duplicate.is_err());
+    mint(&mut r, &bob(), None);
+    let exhausted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        call_as(&carol(), 0);
+        let _ = r.claim_campaign(1, campaign, "2".into());
+    }));
+    assert!(exhausted.is_err());
+}
+
+#[test]
+fn expired_campaign_releases_unused_budget() {
+    let mut r = setup();
+    call_as(&creator(), NEAR);
+    let campaign = r.create_reward_campaign(
+        1,
+        "Short campaign".into(),
+        U128(NEAR / 100),
+        2,
+        0,
+        U64(0),
+        U64(1),
+    );
+    let still_active = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        call_as(&creator(), 0);
+        r.close_reward_campaign(1, campaign);
+    }));
+    assert!(still_active.is_err());
+
+    let mut expired = ctx(&creator(), 0, 101);
+    expired.block_timestamp(2_000_000);
+    testing_env!(expired.build());
+    assert!(r.close_reward_campaign(1, campaign));
+    let closed = r.reward_campaign(1, campaign).unwrap();
+    assert!(closed.closed);
+    assert_eq!(closed.remaining_budget.0, 0);
+    assert_eq!(closed.storage_reserve.0, 0);
+    assert!(r.accounting().solvent);
+}
+
+#[test]
+fn campaign_failed_payout_can_be_retried_without_pool_accounting_damage() {
+    let mut r = setup();
+    mint(&mut r, &alice(), None);
+    call_as(&creator(), NEAR);
+    let campaign = r.create_reward_campaign(
+        1,
+        "Welcome grant".into(),
+        U128(NEAR / 100),
+        1,
+        0,
+        U64(0),
+        U64(1_000_000),
+    );
+    call_as(&bob(), 0);
+    let _ = r.claim_campaign(1, campaign, "1".into());
+    callback_with(PromiseResult::Failed);
+    assert!(!r.on_campaign_payout("1".into(), U128(NEAR / 100)));
+    assert_eq!(r.campaign_owed_to("1".into()).0, NEAR / 100);
+    assert_eq!(
+        r.programme(1).unwrap().reserved.0,
+        0,
+        "campaign reserve is not pool revenue"
+    );
+    call_as(&bob(), 0);
+    let _ = r.claim_campaign_owed("1".into());
+    assert_eq!(r.campaign_owed_to("1".into()).0, 0);
+}
+
+#[test]
+fn nep199_payout_splits_creator_and_seller_and_transfer_changes_owner() {
+    let mut r = setup();
+    mint(&mut r, &alice(), None);
+    let payout = r.nft_payout("1".into(), U128(NEAR), Some(10));
+    assert_eq!(payout.payout.get(&creator()).unwrap().0, NEAR / 20);
+    assert_eq!(payout.payout.get(&alice()).unwrap().0, NEAR - NEAR / 20);
+    call_as(&alice(), ONE_YOCTO);
+    let result = r.nft_transfer_payout(bob(), "1".into(), None, None, U128(NEAR), Some(10));
+    assert_eq!(result.payout.get(&creator()).unwrap().0, NEAR / 20);
+    assert_eq!(owner(&r, "1"), bob());
+    assert_eq!(info(&r, "1").owner_epoch, 2);
 }

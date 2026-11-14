@@ -7,10 +7,10 @@ pass owns its own account. **V1** (`#/v1`, archive) reads `crewpass.testnet` and
 
 | Route | Who | What it decides or returns |
 |---|---|---|
-| `GET /api/v2/config`, `/programmes`, `/programmes/:id`, `/programmes/:id/rewards`, `/passes[?owner=]`, `/passes/:id`, `/passes/:id/history`, `/events[?programme=]` | everyone | public chain data; pass detail includes the account's balance, key count and code hash compared with the registry's |
+| `GET /api/v2/config`, `/programmes`, `/programmes/:id`, `/programmes/:id/rewards[?owner=]`, `/passes[?owner=]`, `/passes/:id`, `/passes/:id/history`, `/events[?programme=]` | everyone | public chain data; campaign claim status is limited to passes for the optional owner filter |
 | `GET /api/v2/members/:id` | current holder of that pass | tier-gated content; locked posts are sent without their body |
 | `GET /api/v2/events/:id/access` | buyer of a visitor ticket, or current holder of a pass with an attached ticket | event access |
-| `GET /api/v2/creator/:programmeId` | the programme's creator on chain | dashboard data, check-ins waiting |
+| `GET /api/v2/creator/:programmeId` | the programme's creator on chain | dashboard data, editable member content, check-ins waiting |
 | `GET/POST /api/v2/companion/:id`, `DELETE …/memory` | current holder (delete: any session, own memory, every epoch) | companion; memory keyed by token + owner epoch + account |
 
 Every gated route reads ownership fresh from the chain and answers 502 (never content) if the chain cannot
@@ -67,7 +67,10 @@ from a NEAR RPC node. If NearBlocks is unavailable, the page shows the on-chain 
 `/api/companion/:tokenId` (GET history, POST a message) and `/api/companion/:tokenId/memory` (DELETE).
 Only the current holder of that pass, checked on chain on every request. Memory is encrypted
 (AES-256-GCM) per pass and holder; the model is any OpenAI-compatible API set by environment
-variables, or an offline mode without one. Full design: [docs/PRODUCT.md](../docs/PRODUCT.md) §6;
+variables, or an offline mode without one. Set `AI_PROVIDER=nearai-tee`, `NEARAI_API_KEY` and `AI_MODEL`
+to use NEAR AI's E2EE and TEE response verification; an overridden `NEARAI_BASE_URL` must use HTTPS.
+Unverified or unavailable replies are not shown. This provider requires Node 24.22.1 or newer.
+Full design: [docs/PRODUCT.md](../docs/PRODUCT.md) §8;
 environment variables: §10; threats C1 to C10: [THREAT_MODEL.md](../THREAT_MODEL.md).
 
 ## Run locally
@@ -78,6 +81,8 @@ npm install
 npm run dev        # server on :8787, pages on :5173
 npm test           # server security tests
 ```
+
+Use Node 24.22.1 or newer for the current lockfile and optional TEE provider.
 
 The API server runs Node with `--use-system-ca`, so it trusts the operating system's certificate
 store. Without it, antivirus HTTPS scanning (Avast on the development machine) makes every RPC call

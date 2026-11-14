@@ -14,7 +14,7 @@ from the same receipt, and the seller keeps no key, session or other route back 
 | **V2 registry** | [`crewpass-v2.testnet`](https://testnet.nearblocks.io/address/crewpass-v2.testnet) |
 | **Pass-account code** | global contract, by hash `CuX7PYtWMa9ZG18jkHGTYKutgQVQoKNWiQSFvmmzEzRL` (immutable) |
 | **V1 (archive, unchanged)** | [`crewpass.testnet`](https://testnet.nearblocks.io/address/crewpass.testnet) |
-| **Tests** | 68 V2 contract unit · 11 V2 sandbox · 43 web server · V1: 36 unit + 6 sandbox |
+| **Tests** | 64 V2 registry + 9 pass-account unit · 11 V2 sandbox · 46 web server · V1: 36 unit + 6 sandbox |
 | **Live evidence** | [deploy/v2-live-run.md](deploy/v2-live-run.md): 29 testnet transactions, 0 unexpected · [deploy/v2-web-check.md](deploy/v2-web-check.md): 12 real sign-in and access checks, 0 unexpected |
 | **License** | MIT. Not audited. |
 
@@ -70,10 +70,10 @@ near contract call-function as-read-only crewpass-v2.testnet accounting json-arg
 ## Run the tests (Linux or WSL2)
 
 ```bash
-scripts/test-v2.sh          # V2: 68 unit tests, build wasm, 11 sandbox tests on a local NEAR node (~3 min)
+scripts/test-v2.sh          # V2 unit tests, wasm build, sandbox tests
 scripts/test-v2.sh unit     # V2 unit tests only
 scripts/test.sh             # V1: 36 unit + 6 sandbox tests
-cd web && npm install && npm test   # 43 web server tests
+cd web && npm install && npm test   # web server tests (46 pass)
 ```
 
 The V2 sandbox tests publish the pass-account code as a real global contract on a local nearcore 2.14
@@ -114,11 +114,15 @@ All created through the free testnet faucet. No keys are in this repository. Bui
 
 ## Honest limits
 
-- **The registry is the trust root.** Its full-access key still exists during the hackathon (for fixes). Anyone
-  holding it could redeploy the registry and control every pass account. Removing the key is the step
-  before any real use (THREAT_MODEL U1).
+- **The registry is the trust root.** Its full-access key is intentionally retained on testnet until an
+  independent security review. Anyone holding it could redeploy the registry and control every pass account.
+  Remove it after review and before any production use (THREAT_MODEL U1).
 - **House of Stake TLAs are not used.** They exist only on mainnet. CrewPass follows the same pattern
   (keyless account + shared global code + registry as authority) in its own contracts. See the ADR.
 - Builds are `cargo near build non-reproducible-wasm`; the sha256 of each deployed wasm is recorded.
+- To verify the V2 pass account, registry, and test target in the pinned Docker image, run
+  `bash deploy/v2-reproducible-build.sh` from a clean, committed checkout. Docker and `cargo-near` are required.
+- `bash deploy/v2-upgrade-testnet.sh` upgrades the existing testnet registry without reinitializing its state;
+  run it only after the unit and sandbox checks pass and you have reviewed the resulting wasm hash.
 - Sybil referrals (one person, two accounts) are not prevented. Check-ins and achievements are attested by the creator.
 - The AI companion on Gemini's free tier is not private; members are told before their first message.

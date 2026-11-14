@@ -227,7 +227,7 @@ export function PassV2Page({ id, config }: { id: string; config: ConfigV2 | null
                 <h2>For sale: Ⓝ {near(pass.listing.price)}</h2>
                 <p className="muted">
                   You get the pass, control of <span className="mono">{pass.account_id}</span> (Ⓝ {near(account?.balance ?? "0")} now), Ⓝ {near(pass.rewards_available)} of
-                  unclaimed rewards, its {pass.tier} tier and its history. Nothing can leave the account while it is listed.
+                  unclaimed rewards, its {pass.tier} tier and its history. Nothing can leave the account while it is listed. A {(config?.creator_royalty_bps ?? 500) / 100}% creator royalty is included in CrewPass sales.
                 </p>
                 <button
                   disabled={!!tx.busy}

@@ -12,7 +12,11 @@ const LABEL: Record<string, string> = {
   referral_paid: "Referral paid",
   ticket_purchased: "Ticket sold",
   treasury_withdrawn: "Creator withdrew",
+  reward_campaign_created: "Campaign funded",
+  campaign_claimed: "Campaign paid to pass account",
+  reward_campaign_closed: "Campaign closed",
 };
+const TIER_NAMES = ["Bronze", "Silver", "Gold", "Platinum"];
 
 export function RewardsPage({ id, config }: { id?: string; config: ConfigV2 | null }) {
   const [programmes, setProgrammes] = useState<ProgrammeV2[]>([]);
@@ -20,7 +24,7 @@ export function RewardsPage({ id, config }: { id?: string; config: ConfigV2 | nu
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState("");
   const load = () => {
-    if (selected) v2.rewards(selected).then(setData).catch((e) => setErr(errorText(e)));
+    if (selected) v2.rewards(selected, tx.wallet.accountId ?? undefined).then(setData).catch((e) => setErr(errorText(e)));
   };
   const tx = useTx(config?.contract, load);
   useEffect(() => {
@@ -32,7 +36,7 @@ export function RewardsPage({ id, config }: { id?: string; config: ConfigV2 | nu
   useEffect(() => {
     setData(null);
     load();
-  }, [selected]);
+  }, [selected, tx.wallet.accountId]);
 
   const p = data?.programme;
   return (
@@ -89,6 +93,40 @@ export function RewardsPage({ id, config }: { id?: string; config: ConfigV2 | nu
               ))}
             </tbody>
           </table>
+        </section>
+      )}
+      {data && data.campaigns.length > 0 && (
+        <section className="panel" style={{ display: "grid", gap: 14 }}>
+          <h2>Reward campaigns</h2>
+          <p className="muted">Each eligible pass can claim once before the campaign expires. The reward always goes to that pass's account.</p>
+          {data.campaigns.map((campaign) => {
+            const active = !campaign.closed && Date.now() >= Number(campaign.starts_at_ms) && Date.now() < Number(campaign.ends_at_ms) && campaign.claimed < campaign.max_claims;
+            return <article key={campaign.id} className="panel">
+              <div className="actions" style={{ justifyContent: "space-between" }}>
+                <div><h3>{campaign.title}</h3><p className="muted">Ⓝ {near(campaign.reward_per_pass)} per pass · {TIER_NAMES[campaign.min_tier]}+ · {campaign.claimed}/{campaign.max_claims} claimed · Ⓝ {near(campaign.remaining_budget)} reserved</p></div>
+                <span className={`status ${active ? "live" : "demo"}`}>{campaign.closed ? "Closed" : active ? "Active" : "Not active"}</span>
+              </div>
+              {campaign.passes.filter((x) => !x.claimed).map((pass) => {
+                const eligible = TIER_NAMES.indexOf(pass.tier) >= campaign.min_tier;
+                return <div key={pass.token_id} className="proof-line" style={{ justifyContent: "space-between" }}>
+                  <span>Pass #{pass.token_id} · {pass.tier} · {shortAccount(pass.owner_id)} · {pass.claimed ? "claimed" : eligible ? "eligible" : `requires ${TIER_NAMES[campaign.min_tier]}`}</span>
+                  <button className="quiet" style={{ padding: "6px 10px" }} disabled={!tx.wallet.accountId || !!tx.busy || !active || !eligible || pass.claimed}
+                    onClick={() => tx.run(`campaign-${campaign.id}-${pass.token_id}`, "claim_campaign", { programme_id: data.programme.id, campaign_id: campaign.id, token_id: pass.token_id }, "0", `Ⓝ ${near(campaign.reward_per_pass)} sent to pass #${pass.token_id}'s account.`)}>
+                    Claim
+                  </button>
+                </div>;
+              })}
+            </article>;
+          })}
+        </section>
+      )}
+      {data && data.passes.some((x) => BigInt(x.campaign_owed) > 0n) && (
+        <section className="panel">
+          <h2>Failed campaign payouts</h2>
+          {data.passes.filter((x) => BigInt(x.campaign_owed) > 0n).map((x) => <div key={x.token_id} className="proof-line" style={{ justifyContent: "space-between" }}>
+            <span>Pass #{x.token_id}: Ⓝ {near(x.campaign_owed)} still owed to its account</span>
+            <button className="quiet" disabled={!tx.wallet.accountId || !!tx.busy} onClick={() => tx.run(`retry-${x.token_id}`, "claim_campaign_owed", { token_id: x.token_id }, "0", `Campaign reward sent to ${x.account_id}.`)}>Retry payout</button>
+          </div>)}
         </section>
       )}
       {tx.msg && <div className={`note ${tx.msg.kind}`}>{tx.msg.text}</div>}

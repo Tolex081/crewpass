@@ -4,7 +4,7 @@ Master product document. [README.md](../README.md) is the quick start, [ADR-001]
 account design, [THREAT_MODEL.md](../THREAT_MODEL.md) the security record, [AUDIT.md](AUDIT.md) the check against
 the brief. Every feature below is marked **built** (deployed on testnet and tested), **partial** or **planned**.
 
-Last updated: 2026-11-13.
+Last updated: 2026-11-14. The V2 additions described below are deployed to testnet. Contract unit and sandbox checks pass; TEE credentials/runtime, a clean Docker reproducible build, and an external security audit remain outstanding.
 
 ---
 
@@ -68,6 +68,7 @@ keys for holders, deterministic accounts) and why they were rejected.
 |---|---|---|
 | Mint price | exact; seed → pass account; referral % → referrer pass account; rest − measured storage → treasury | real NEAR / treasury |
 | Ticket | exact price; member share → pool; rest − measured storage → treasury | pool / treasury |
+| Resale | CrewPass `buy` pays a fixed 5% creator royalty and the balance to seller; NEP-199 returns the same split to integrating marketplaces | creator / seller |
 | Pool | `per_pass = (amount + carry) / active_passes`, remainder carried; new passes start at the current index | accrued per pass |
 | Claim | anyone may call; pays the pass's accrued amount into the pass account; failure keeps it on the pass | real NEAR |
 | Treasury | creator only, never more than held, reduce first, owed on failure | creator wallet |
@@ -95,7 +96,7 @@ metadata (title `… · Gold`, on-chain SVG `media`, `extra` JSON with tier and 
 |---|---|
 | Owner, account control, balances, rewards, tiers, tickets, check-ins | Registry contract (testnet) |
 | Account balance and keys | NEAR protocol (`view_account`, `view_access_key_list`) |
-| Programme posts, benefit wording, companion knowledge | `web/server/catalog.ts`, used only when the creator on chain matches |
+| Programme posts, benefit wording, companion knowledge | Creator-managed content stored by the registry; curated catalogue remains as a fallback |
 | Companion memory | Encrypted store keyed by contract + token + owner epoch + account |
 | Sessions | HMAC tokens, 15 minutes; never override on-chain ownership |
 | Sign-in nonces | Single use; shared across instances through Upstash when configured |
@@ -120,9 +121,12 @@ delete their own memory for every epoch they had.
 
 Read-only, no tools and no keys. It knows the programme content, the pass's tier, points, next tier, account
 balance, rewards waiting, referral earnings, open events, and the member's own conversation during the current ownership
-epoch. It never moves funds; it names the button to press. The model is any OpenAI-compatible API set by
-environment variables. Without a model, an offline mode answers from the same facts and says so. Rate limited to
-20 messages per 10 minutes. AES-256-GCM at rest. The provider is disclosed before the first message.
+epoch. It never moves funds; it names the button to press. The default provider is any OpenAI-compatible API set by
+environment variables. An optional provider interface supports verified providers; the first integration is NEAR AI
+Cloud's E2EE SDK with TEE response verification and fails closed when its proof is missing or invalid. Without a model,
+an offline mode answers from the same facts and says so. Rate limited to 20 messages per 10 minutes. AES-256-GCM at
+rest. The provider is disclosed before the first message. TEE mode still relies on the site to protect API credentials
+and encrypted chat history.
 
 ## 9. Security
 
@@ -143,6 +147,7 @@ environment variables. Without a model, an offline mode answers from the same fa
 | `MEMORY_ENCRYPTION_KEY` | 32 bytes hex/base64 for companion memory |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` (or `KV_REST_API_*`) | Memory, rate limits and **cross-instance nonce replay protection** |
 | `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL`, `AI_DATA_NOTICE` | Companion model (optional) |
+| `AI_PROVIDER=nearai-tee`, `NEARAI_API_KEY`, `NEARAI_BASE_URL`, `AI_MODEL` | Optional verified NEAR AI TEE provider; server runtime must be Node 24.22.1 or newer |
 | `NEP413_RECIPIENT` | Site name bound into sign-in signatures |
 | `NEAR_RPC_URL`, `NEARBLOCKS_URL` | Overrides |
 
@@ -157,8 +162,12 @@ environment variables. Without a model, an offline mode answers from the same fa
 | Companion with ownership-epoch memory | built |
 | Paged, complete-or-flagged history from NearBlocks v3 | built |
 | Reproducible (Docker) builds | partial: non-reproducible builds with recorded sha256 |
-| Removing the registry's full-access key | planned (after final deploy) |
-| NEP-199 resale royalties | planned |
-| Creator-editable member content (today: file-based catalog) | planned |
-| Creator-funded campaigns with conditions and expiry (today: fund the whole pool) | planned |
-| Private (TEE) AI provider | planned |
+| Removing the registry's full-access key | retained on testnet until independent security review; remove after review before any production use |
+| NEP-199 resale royalties | deployed on testnet: fixed 5% creator payout; contract unit tests pass |
+| Creator-editable member content | deployed on testnet: on-chain content editor with tier-gated member posts; contract and web tests pass |
+| Creator-funded campaigns with conditions and expiry | deployed on testnet: per-pass claim, minimum tier, dates, bounded claims, reserved budget, and reclaim; contract tests pass |
+| Private (TEE) AI provider | code deployed with the registry/web integration; provider-agnostic interface and verified NEAR AI integration implemented; live provider credentials/runtime verification pending |
+
+The creator royalty is fixed at 5% in this implementation. NEP-199-compatible marketplaces receive a payout map but must execute those payments themselves; only CrewPass's own sale method guarantees payment. The testnet upgrade preserved the existing programme/pass state and pass-account code hash. The registry's full-access key remains a separate final security action after review.
+
+Dependency review: the pinned Hono packages were updated to patched same-major releases. `npm audit` still reports three low-severity paths through `elliptic` in NEAR AI's DCAP verifier, with no upstream fixed version. CrewPass uses the SDK's Node entrypoint, whose verifier selects Node's built-in crypto implementation; keep the SDK on the server and recheck this advisory when the upstream dependency changes ([GHSA-848j-6mx2-7j84](https://github.com/advisories/GHSA-848j-6mx2-7j84)).

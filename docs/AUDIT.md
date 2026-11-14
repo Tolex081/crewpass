@@ -1,5 +1,7 @@
 # CrewPass V2: audit against the brief and Track 10
 
+> Historical review dated 2026-11-13. Its findings and hashes describe the code reviewed on that date. Follow-up code for resale payouts, creator content, campaigns, and a verified TEE provider was tested and the registry was upgraded on testnet on 2026-11-14; see [the upgrade record](../deploy/v2-upgrade-2026-11-14.json) for its own hash and verification results. No external security audit has been performed.
+
 Checked on 2026-11-13 against the "CrewPass V2: complete architectural redesign" brief and the Track 10 page
 (*NFTs That Do Something*: "Build NFTs as accounts — assets that own money, earn royalties, hold inventory,
 carry credentials, memberships or access rights. Ownership with behavior." Tags: dynamic NFTs, NEP-171,

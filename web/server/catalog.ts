@@ -63,21 +63,23 @@ export function catalogFor(contract: string, programmeId: number, creator: strin
 }
 
 /** Fallback for programmes without curated content: only what the creator put on chain. */
-export function genericEntry(programmeId: number, creator: string, name: string, description: string): CatalogEntry {
+export function genericEntry(programmeId: number, creator: string, name: string, description: string, memberShareBps = 0): CatalogEntry {
+  const benefits: CatalogEntry["benefits"] = [
+    { text: "Members area and private companion for current holders", minTier: "Bronze" },
+  ];
+  if (memberShareBps > 0) benefits.push({ text: `A ${memberShareBps / 100}% share of ticket revenue is distributed to pass accounts`, minTier: "Bronze" });
   return {
     programmeId,
     creator,
     label: "Content from the programme's on-chain description",
     summary: description || name,
     companion: { name: `${name} companion`, tone: "Friendly, concise, plain English." },
-    benefits: [
-      { text: "Members area and private companion for current holders", minTier: "Bronze" },
-      { text: "A share of ticket revenue paid into the pass account", minTier: "Bronze" },
-    ],
+    benefits,
     posts: [{ title: `Welcome to ${name}`, body: description || "This creator has not added member posts yet.", minTier: "Bronze" }],
     knowledge: [
       { title: name, body: description || "No description yet." },
-      ...STUDY_CREW.knowledge.slice(0, 5),
+      { title: "Pass account", body: "Each pass has its own keyless NEAR account. The current NFT holder controls account operations through the registry." },
+      { title: "Points and tiers", body: "Tier and points are calculated by the registry contract. Check this programme's on-chain settings and member content for its specific rules." },
     ],
   };
 }

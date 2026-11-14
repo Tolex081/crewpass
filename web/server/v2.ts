@@ -7,7 +7,7 @@ import type { CompanionDeps } from "./app.js";
 import type { Session } from "./tokens.js";
 import { memoryKeyV2 } from "./memory.js";
 import { MAX_INPUT_CHARS, ProviderError, quoted, RATE_LIMIT, type PassFacts } from "./companion.js";
-import { catalogFor, genericEntry, tierRank, TIER_ORDER, type CatalogEntry } from "./catalog.js";
+import { catalogFor, genericEntry, tierRank, TIER_ORDER, type CatalogEntry, type Tier } from "./catalog.js";
 
 export interface V2Options {
   chain: Chain;
@@ -81,6 +81,31 @@ export interface EventV2 {
   checked_in: number;
 }
 
+export interface ProgrammeContentV2 {
+  label: string;
+  summary: string;
+  companion_name: string;
+  companion_tone: string;
+  benefits: { text: string; min_tier: number }[];
+  posts: { title: string; body: string; min_tier: number }[];
+  knowledge: { title: string; body: string }[];
+}
+
+interface RewardCampaignV2 {
+  id: string;
+  programme_id: number;
+  title: string;
+  reward_per_pass: string;
+  max_claims: number;
+  claimed: number;
+  min_tier: number;
+  starts_at_ms: string;
+  ends_at_ms: string;
+  remaining_budget: string;
+  storage_reserve: string;
+  closed: boolean;
+}
+
 interface TicketV2 {
   event_id: number;
   buyer: string;
@@ -102,6 +127,10 @@ export function nearStr(yocto: string | bigint): string {
 }
 
 const validId = (id: string) => /^\d{1,12}$/.test(id);
+const methodNotAvailable = (error: unknown) => {
+  const e = error as Error & { cause_name?: string };
+  return e?.cause_name === "MethodNotFound" || /MethodNotFound/.test(e?.message ?? "");
+};
 
 /** Does this V2 event concern the given pass? */
 export function v2EventTouchesPass(e: ChainEvent, tokenId: string): boolean {
@@ -110,8 +139,31 @@ export function v2EventTouchesPass(e: ChainEvent, tokenId: string): boolean {
   return Array.isArray(d.token_ids) && (d.token_ids as unknown[]).includes(tokenId);
 }
 
-export function entryFor(contract: string, p: ProgrammeV2): CatalogEntry {
-  return catalogFor(contract, p.id, p.creator) ?? genericEntry(p.id, p.creator, p.name, p.description);
+export function entryFor(contract: string, p: ProgrammeV2, saved?: ProgrammeContentV2 | null): CatalogEntry {
+  if (saved) {
+    const tier = (n: number): Tier => TIER_ORDER[n] ?? "Bronze";
+    return {
+      programmeId: p.id, creator: p.creator, label: saved.label, summary: saved.summary,
+      companion: { name: saved.companion_name, tone: saved.companion_tone },
+      benefits: saved.benefits.map((x) => ({ text: x.text, minTier: tier(x.min_tier) })),
+      posts: saved.posts.map((x) => ({ title: x.title, body: x.body, minTier: tier(x.min_tier) })),
+      knowledge: saved.knowledge,
+    };
+  }
+  return catalogFor(contract, p.id, p.creator) ?? genericEntry(p.id, p.creator, p.name, p.description, p.member_share_bps);
+}
+
+function contentForEditor(entry: CatalogEntry): ProgrammeContentV2 {
+  const rank = (tier: Tier) => Math.max(0, TIER_ORDER.indexOf(tier));
+  return {
+    label: entry.label,
+    summary: entry.summary,
+    companion_name: entry.companion.name,
+    companion_tone: entry.companion.tone,
+    benefits: entry.benefits.map((x) => ({ text: x.text, min_tier: rank(x.minTier) })),
+    posts: entry.posts.map((x) => ({ title: x.title, body: x.body, min_tier: rank(x.minTier) })),
+    knowledge: entry.knowledge,
+  };
 }
 
 /** Members content for a pass: unlocked posts in full, locked ones as titles with the tier they need. */
@@ -233,6 +285,19 @@ export function mountV2(app: Hono, d: Deps) {
     return view<ProgrammeV2 | null>("programme", { programme_id: id }, fresh);
   }
 
+  async function savedContent(p: ProgrammeV2, fresh = false): Promise<ProgrammeContentV2 | null> {
+    try {
+      return await view<ProgrammeContentV2 | null>("programme_content", { programme_id: p.id }, fresh);
+    } catch (error) {
+      if (!methodNotAvailable(error)) throw error;
+      return null;
+    }
+  }
+
+  async function contentEntry(p: ProgrammeV2, fresh = false): Promise<CatalogEntry> {
+    return entryFor(d.v2!.contract, p, await savedContent(p, fresh));
+  }
+
   async function allTokens(owner?: string): Promise<Token[]> {
     const out: Token[] = [];
     for (let from = 0; from < 2000; from += 100) {
@@ -314,7 +379,10 @@ export function mountV2(app: Hono, d: Deps) {
   app.get("/v2/programmes", async (c) => {
     if (!d.v2) return off(c);
     const list = await view<ProgrammeV2[]>("programmes", { from_id: 1, limit: 100 });
-    return c.json(list.map((p) => ({ ...p, content: { label: entryFor(d.v2!.contract, p).label, summary: entryFor(d.v2!.contract, p).summary } })));
+    return c.json(await Promise.all(list.map(async (p) => {
+      const entry = await contentEntry(p);
+      return { ...p, content: { label: entry.label, summary: entry.summary } };
+    })));
   });
 
   app.get("/v2/programmes/:id", async (c) => {
@@ -323,7 +391,7 @@ export function mountV2(app: Hono, d: Deps) {
     if (!validId(id)) return c.json({ error: "No programme with that number." }, 404);
     const p = await programme(Number(id));
     if (!p) return c.json({ error: "No programme with that number." }, 404);
-    const entry = entryFor(d.v2.contract, p);
+    const entry = await contentEntry(p);
     const all = await passes(await allTokens());
     return c.json({
       programme: p,
@@ -337,6 +405,8 @@ export function mountV2(app: Hono, d: Deps) {
     if (!d.v2) return off(c);
     const id = c.req.param("id");
     if (!validId(id)) return c.json({ error: "No programme with that number." }, 404);
+    const owner = c.req.query("owner");
+    if (owner !== undefined && !/^[a-z0-9._-]{2,64}$/.test(owner)) return c.json({ error: "Not a NEAR account name." }, 400);
     const p = await programme(Number(id));
     if (!p) return c.json({ error: "No programme with that number." }, 404);
     const all = (await passes(await allTokens())).filter((x) => x.programme_id === p.id);
@@ -350,13 +420,38 @@ export function mountV2(app: Hono, d: Deps) {
     const relevant = page.events.filter(
       (e) =>
         (e.event === "revenue_distributed" && Number(e.data.programme_id) === p.id) ||
+        (["reward_campaign_created", "campaign_claimed", "reward_campaign_closed"].includes(e.event) && Number(e.data.programme_id) === p.id) ||
         (["rewards_claimed", "referral_paid"].includes(e.event) && tokenIds.has(String(e.data.token_id))) ||
         (e.event === "ticket_purchased" && Number(e.data.programme_id) === p.id) ||
         (e.event === "treasury_withdrawn" && Number(e.data.programme_id) === p.id),
     );
+    let campaigns: RewardCampaignV2[] = [];
+    try {
+      campaigns = await view<RewardCampaignV2[]>("reward_campaigns", { programme_id: p.id });
+    } catch (error) {
+      if (!methodNotAvailable(error)) throw error;
+    }
+    const viewerPasses = owner ? all.filter((pass) => pass.owner_id === owner) : [];
+    const owedByToken = new Map(await Promise.all(viewerPasses.map(async (pass) => [
+      pass.token_id,
+      await view<string>("campaign_owed_to", { token_id: pass.token_id }),
+    ] as const)));
+    const campaignRows = await Promise.all(campaigns.map(async (campaign) => ({
+      ...campaign,
+      passes: await Promise.all(viewerPasses.map(async (pass) => ({
+        token_id: pass.token_id,
+        owner_id: pass.owner_id,
+        account_id: pass.account_id,
+        tier: pass.tier,
+        claimed: await view<boolean>("has_claimed_campaign", { programme_id: p.id, campaign_id: campaign.id, token_id: pass.token_id }),
+        owed: owedByToken.get(pass.token_id) ?? "0",
+      }))),
+    })));
     return c.json({
       programme: p,
-      passes: all.map((x) => ({ token_id: x.token_id, owner_id: x.owner_id, account_id: x.account_id, rewards_available: x.rewards_available, rewards_claimed: x.rewards_claimed, referral_earned: x.referral_earned })),
+      passes: await Promise.all(all.map(async (x) => ({ token_id: x.token_id, owner_id: x.owner_id, account_id: x.account_id, rewards_available: x.rewards_available, rewards_claimed: x.rewards_claimed, referral_earned: x.referral_earned,
+        campaign_owed: owedByToken.get(x.token_id) ?? "0" }))),
+      campaigns: campaignRows,
       history: { complete: page.complete, events: relevant },
     });
   });
@@ -443,7 +538,7 @@ export function mountV2(app: Hono, d: Deps) {
     if (h instanceof Response) return h;
     const p = await programme(h.pass.programme_id, true);
     if (!p) return c.json({ error: "Programme not found." }, 404);
-    const entry = entryFor(d.v2.contract, p);
+    const entry = await contentEntry(p, true);
     return c.json({
       accountId: h.session.accountId,
       checkedAt: new Date(d.now()).toISOString(),
@@ -472,7 +567,9 @@ export function mountV2(app: Hono, d: Deps) {
         if (t) checkIns.push({ event_id: e.id, token_id: x.token_id, checked_in: t.checked_in });
       }
     }
-    return c.json({ programme: p, events: evs, passes: ps, passTickets: checkIns });
+    const saved = await savedContent(p, true);
+    const content = saved ?? contentForEditor(entryFor(d.v2.contract, p));
+    return c.json({ programme: p, events: evs, passes: ps, passTickets: checkIns, content });
   });
 
   const companionOff = (c: Context) => c.json({ error: "The companion is switched off on this server." }, 503);
@@ -487,7 +584,8 @@ export function mountV2(app: Hono, d: Deps) {
     const p = await programme(h.pass.programme_id, true);
     if (!p) return c.json({ error: "Programme not found." }, 404);
     const rec = await companion.memory.load(memoryKeyV2(d.v2.contract, id, h.pass.owner_epoch, h.session.accountId));
-    return c.json({ pass: await facts(h.pass, p), history: rec.messages, ownerEpoch: h.pass.owner_epoch, name: entryFor(d.v2.contract, p).companion.name });
+    const entry = await contentEntry(p, true);
+    return c.json({ pass: await facts(h.pass, p), history: rec.messages, ownerEpoch: h.pass.owner_epoch, name: entry.companion.name });
   });
 
   app.post("/v2/companion/:id", async (c) => {
@@ -507,7 +605,7 @@ export function mountV2(app: Hono, d: Deps) {
     }
     const p = await programme(h.pass.programme_id, true);
     if (!p) return c.json({ error: "Programme not found." }, 404);
-    const entry = entryFor(d.v2.contract, p);
+    const entry = await contentEntry(p, true);
     const f = await facts(h.pass, p);
     const key = memoryKeyV2(d.v2.contract, id, h.pass.owner_epoch, h.session.accountId);
     const rec = await companion.memory.load(key);

@@ -4,6 +4,7 @@ description = "CrewPass V2 pass account: keyless account code that obeys only it
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/Tolex081/crewpass"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

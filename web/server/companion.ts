@@ -112,6 +112,45 @@ export class OpenAICompatProvider implements Provider {
   }
 }
 
+/** NEAR AI Cloud provider with attestation preflight, encrypted model input, and verified replies. */
+export class NearAiTeeProvider implements Provider {
+  readonly mode = "model" as const;
+  readonly label: string;
+
+  constructor(private apiKey: string, private model: string, private baseUrl = "https://cloud-api.near.ai/v1/") {
+    this.label = `${model} (verified TEE)`;
+  }
+
+  async reply({ system, context, history, message }: Parameters<Provider["reply"]>[0]): Promise<string> {
+    try {
+      const { InferenceClient } = await import("@nearai/inference-sdk/node");
+      const client = new InferenceClient({ apiKey: this.apiKey, baseUrl: this.baseUrl, e2ee: true });
+      const completion = await client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: "system", content: system },
+          { role: "system", content: context },
+          ...history.map((m) => ({ role: m.role, content: m.content })),
+          { role: "user", content: message },
+        ],
+        max_tokens: 600,
+        temperature: 0.4,
+      });
+      const proof = await client.verifyResponse(completion.id);
+      if (proof.signatureKind !== "provider_tee") {
+        throw new ProviderError("The AI reply did not include a verified TEE model signature.");
+      }
+      const answer = completion.choices[0]?.message?.content;
+      if (typeof answer !== "string" || !answer.trim()) throw new ProviderError("The AI service returned an empty answer.");
+      return answer.trim();
+    } catch (e) {
+      if (e instanceof ProviderError) throw e;
+      console.error("Verified TEE AI request failed", e instanceof Error ? e.name : "non-error");
+      throw new ProviderError("A private, verified AI reply could not be produced. Try again shortly.");
+    }
+  }
+}
+
 // ---- offline fallback --------------------------------------------------------------------------
 
 const STOP = new Set("a an and are as at be but by can do does for from how i if in is it its me my of on or so that the this to was what when where which who why will with you your".split(" "));
@@ -157,6 +196,18 @@ export class OfflineProvider implements Provider {
 }
 
 export function providerFromEnv(env: NodeJS.ProcessEnv = process.env): Provider {
+  if (env.AI_PROVIDER === "nearai-tee") {
+    const key = env.NEARAI_API_KEY;
+    const model = env.AI_MODEL;
+    const baseUrl = env.NEARAI_BASE_URL ?? "https://cloud-api.near.ai/v1/";
+    let secureEndpoint = false;
+    try {
+      secureEndpoint = new URL(baseUrl).protocol === "https:";
+    } catch {
+      /* An invalid endpoint keeps the provider offline. */
+    }
+    return key && model && secureEndpoint ? new NearAiTeeProvider(key, model, baseUrl) : new OfflineProvider();
+  }
   const { AI_BASE_URL: base, AI_API_KEY: key, AI_MODEL: model } = env;
   return base && key && model ? new OpenAICompatProvider(base, key, model) : new OfflineProvider();
 }

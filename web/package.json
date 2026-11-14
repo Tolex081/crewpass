@@ -3,17 +3,21 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=24.22.1"
+  },
   "scripts": {
     "dev": "concurrently -n api,web \"tsx watch --use-system-ca server/dev.ts\" \"vite\"",
     "build": "vite build",
     "test": "tsx --test server/*.test.ts"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.8",
     "@hot-labs/near-connect": "0.11.4",
+    "@nearai/inference-sdk": "0.3.0",
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
-    "hono": "4.13.13",
+    "hono": "4.13.18",
     "react": "19.1.10",
     "react-dom": "19.1.10"
   },

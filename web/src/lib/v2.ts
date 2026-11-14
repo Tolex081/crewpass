@@ -64,6 +64,9 @@ export interface ConfigV2 {
   contract: string;
   network: string;
   pass_code_hash: string;
+  creator_royalty_bps: number;
+  storage_byte_cost: string;
+  campaign_claim_storage_bytes: number;
   account_seed: string;
   list_deposit: string;
   lock_timeout_blocks: string;
@@ -103,6 +106,32 @@ export interface Benefit {
   unlocked?: boolean;
 }
 
+export interface ProgrammeContentV2 {
+  label: string;
+  summary: string;
+  companion_name: string;
+  companion_tone: string;
+  benefits: { text: string; min_tier: number }[];
+  posts: { title: string; body: string; min_tier: number }[];
+  knowledge: { title: string; body: string }[];
+}
+
+export interface RewardCampaignV2 {
+  id: string;
+  programme_id: number;
+  title: string;
+  reward_per_pass: string;
+  max_claims: number;
+  claimed: number;
+  min_tier: number;
+  starts_at_ms: string;
+  ends_at_ms: string;
+  remaining_budget: string;
+  storage_reserve: string;
+  closed: boolean;
+  passes: { token_id: string; owner_id: string; account_id: string; tier: string; claimed: boolean; owed: string }[];
+}
+
 async function get<T>(path: string, token?: string): Promise<T> {
   const res = await fetch(`/api/v2${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
   const body = await res.json().catch(() => ({}));
@@ -120,12 +149,13 @@ export const v2 = {
       events: EventV2[];
       passes: PassV2[];
     }>(`/programmes/${id}`),
-  rewards: (id: string | number) =>
+  rewards: (id: string | number, owner?: string) =>
     get<{
       programme: ProgrammeV2;
-      passes: Pick<PassV2, "token_id" | "owner_id" | "account_id" | "rewards_available" | "rewards_claimed" | "referral_earned">[];
+      passes: (Pick<PassV2, "token_id" | "owner_id" | "account_id" | "rewards_available" | "rewards_claimed" | "referral_earned"> & { campaign_owed: string })[];
+      campaigns: RewardCampaignV2[];
       history: { complete: boolean; events: HistoryEvent[] };
-    }>(`/programmes/${id}/rewards`),
+    }>(`/programmes/${id}/rewards${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`),
   passes: (owner?: string) => get<PassV2[]>(owner ? `/passes?owner=${encodeURIComponent(owner)}` : "/passes"),
   pass: (id: string) => get<PassDetail>(`/passes/${encodeURIComponent(id)}`),
   history: (id: string) => get<History>(`/passes/${encodeURIComponent(id)}/history`),
@@ -141,7 +171,7 @@ export const v2 = {
       content: { label: string; benefits: Benefit[]; posts: { title: string; body: string | null; minTier: string; unlocked: boolean }[] };
     }>(`/members/${encodeURIComponent(id)}`, token),
   creator: (token: string, id: number) =>
-    get<{ programme: ProgrammeV2; events: EventV2[]; passes: PassV2[]; passTickets: { event_id: number; token_id: string; checked_in: boolean }[] }>(
+    get<{ programme: ProgrammeV2; events: EventV2[]; passes: PassV2[]; passTickets: { event_id: number; token_id: string; checked_in: boolean }[]; content: ProgrammeContentV2 | null }>(
       `/creator/${id}`,
       token,
     ),

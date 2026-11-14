@@ -23,7 +23,9 @@ function fakeV2() {
   const tickets = new Map<string, { event_id: number; buyer: string; token_id: string | null; checked_in: boolean }>();
   const keys = new Map<string, Map<string, "FullAccess">>();
   let historyComplete = true;
+  let additionalHistory: ChainEvent[] = [];
   let down = false;
+  let missingV2Methods = false;
   const tier = (p: number) => (p >= 150 ? "Platinum" : p >= 80 ? "Gold" : p >= 30 ? "Silver" : "Bronze");
   const pass = (id: string): PassV2 => ({
     token_id: id, owner_id: owners.get(id)!, account_id: `${id}.${V2}`, programme_id: 1,
@@ -36,6 +38,8 @@ function fakeV2() {
     referral_bps: 1000, member_share_bps: 5000, max_supply: null, minted: 2, active_passes: 2, reward_index: "0", carry: "0",
     treasury: "0", reserved: "0", distributed_total: "0", claimed_total: "0", ticket_revenue_total: "0", funded_total: "0", events: 1 };
   const event = { id: 1, programme_id: 1, title: "Live session", price: "50000000000000000000000", capacity: 10, sold: 1, points: 20, starts_at_ms: "0", checked_in: 0 };
+  const campaign = { id: "1", programme_id: 1, title: "Welcome grant", reward_per_pass: "10000000000000000000000", max_claims: 10, claimed: 0, min_tier: 0,
+    starts_at_ms: "0", ends_at_ms: "9999999999999", remaining_budget: "100000000000000000000000", storage_reserve: "0", closed: false };
 
   const v2chain: Chain = {
     async accessKeyPermission() {
@@ -50,6 +54,10 @@ function fakeV2() {
         case "nft_tokens": return [...owners].map(([token_id, owner_id]) => ({ token_id, owner_id })) as T;
         case "nft_tokens_for_owner": return [...owners].filter(([, o]) => o === args.account_id).map(([token_id, owner_id]) => ({ token_id, owner_id })) as T;
         case "programme": return (args.programme_id === 1 ? programme : null) as T;
+        case "programme_content": if (missingV2Methods) throw new Error("MethodNotFound"); return null as T;
+        case "reward_campaigns": return (missingV2Methods ? (() => { throw new Error("MethodNotFound"); })() : [campaign]) as T;
+        case "has_claimed_campaign": return false as T;
+        case "campaign_owed_to": return "0" as T;
         case "programmes": return [programme] as T;
         case "events": return [event] as T;
         case "event": return (String(args.event_id) === "1" ? event : null) as T;
@@ -65,7 +73,7 @@ function fakeV2() {
     },
     async allEvents(): Promise<EventPage> {
       const e: ChainEvent = { txHash: "tx1", timestampMs: 0, signer: "alice.testnet", standard: "crewpass", event: "pass_account_created", data: { token_id: "1" } };
-      return { events: [e], complete: historyComplete, transactionsRead: 1, pagesRead: 1 };
+      return { events: [e, ...additionalHistory], complete: historyComplete, transactionsRead: 1, pagesRead: 1 };
     },
     async account(accountId: string): Promise<AccountState> {
       return { accountId, balance: "10000000000000000000000", storageUsage: 100, globalContractHash: "HASH", accessKeys: 0 };
@@ -86,7 +94,9 @@ function fakeV2() {
   return {
     v1chain, v2chain, owners, epochs, points, tickets, keys,
     setComplete: (v: boolean) => (historyComplete = v),
+    setHistoryEvents: (events: ChainEvent[]) => (additionalHistory = events),
     setDown: (v: boolean) => (down = v),
+    setMissingV2Methods: (v: boolean) => (missingV2Methods = v),
     sell(id: string, to: string) {
       owners.set(id, to);
       epochs.set(id, epochs.get(id)! + 1);
@@ -131,6 +141,33 @@ const json = async (r: Response) => (await r.json()) as Record<string, any>;
 test("V2 members area needs a session", async () => {
   const s = setup();
   assert.equal((await s.req("GET", "/api/v2/members/1")).status, 401);
+});
+
+test("campaign status is returned only for the requested holder's passes", async () => {
+  const s = setup();
+  s.f.setHistoryEvents([
+    { txHash: "tx2", timestampMs: 1, signer: "creator.testnet", standard: "crewpass", event: "reward_campaign_created", data: { programme_id: "1" } },
+    { txHash: "tx3", timestampMs: 2, signer: "alice.testnet", standard: "crewpass", event: "campaign_claimed", data: { programme_id: "1", token_id: "1" } },
+    { txHash: "tx4", timestampMs: 3, signer: "creator.testnet", standard: "crewpass", event: "reward_campaign_closed", data: { programme_id: "1" } },
+  ]);
+  const publicResult = await json(await s.req("GET", "/api/v2/programmes/1/rewards"));
+  assert.deepEqual(publicResult.campaigns[0].passes, []);
+  const holderResult = await json(await s.req("GET", "/api/v2/programmes/1/rewards?owner=alice.testnet"));
+  assert.deepEqual(holderResult.campaigns[0].passes.map((x: { token_id: string }) => x.token_id), ["1"]);
+  assert.equal(holderResult.campaigns[0].passes[0].claimed, false);
+  assert.deepEqual(holderResult.history.events.map((x: { event: string }) => x.event), ["reward_campaign_created", "campaign_claimed", "reward_campaign_closed"]);
+});
+
+test("new programme views fall back cleanly while an older registry is still deployed", async () => {
+  const s = setup();
+  s.f.setMissingV2Methods(true);
+  const programme = await json(await s.req("GET", "/api/v2/programmes/1"));
+  assert.equal(programme.programme.id, 1);
+  const rewards = await json(await s.req("GET", "/api/v2/programmes/1/rewards"));
+  assert.deepEqual(rewards.campaigns, []);
+  const creator = await s.signIn("creator.testnet");
+  const dashboard = await json(await s.req("GET", "/api/v2/creator/1", creator));
+  assert.equal(dashboard.content.label, "Demo programme for the NEAR hackathon");
 });
 
 test("V2 members area: only the current holder of that pass", async () => {

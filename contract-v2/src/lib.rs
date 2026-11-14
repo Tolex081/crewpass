@@ -9,7 +9,9 @@
 //! Design: docs/ADR-001-pass-accounts.md. Threats and the tests that prove them: THREAT_MODEL.md (V2).
 #![allow(deprecated)] // near_sdk::collections write immediately, so storage can be measured mid-call
 
-use near_contract_standards::non_fungible_token::core::{NonFungibleTokenCore, NonFungibleTokenResolver};
+use near_contract_standards::non_fungible_token::core::{
+    NonFungibleTokenCore, NonFungibleTokenResolver,
+};
 use near_contract_standards::non_fungible_token::enumeration::NonFungibleTokenEnumeration;
 use near_contract_standards::non_fungible_token::events::NftMint;
 use near_contract_standards::non_fungible_token::metadata::{
@@ -20,8 +22,8 @@ use near_sdk::collections::{LookupMap, LookupSet};
 use near_sdk::json_types::{Base58CryptoHash, Base64VecU8, U128, U64};
 use near_sdk::serde_json::{json, Value};
 use near_sdk::{
-    assert_one_yocto, env, ext_contract, is_promise_success, near, require, AccountId, BorshStorageKey,
-    CryptoHash, Gas, NearToken, PanicOnDefault, Promise, PromiseOrValue,
+    assert_one_yocto, env, ext_contract, is_promise_success, near, require, AccountId,
+    BorshStorageKey, CryptoHash, Gas, NearToken, PanicOnDefault, Promise, PromiseOrValue,
 };
 use std::collections::HashMap;
 
@@ -44,6 +46,10 @@ pub const MAX_EVENT_CAPACITY: u32 = 10_000;
 pub const LOCK_TIMEOUT_BLOCKS: u64 = 1_200;
 /// Highest gas an owner may ask the pass account to forward to a target contract.
 pub const MAX_ACCOUNT_CALL_GAS: Gas = Gas::from_tgas(150);
+pub const CREATOR_ROYALTY_BPS: u16 = 500;
+pub const MAX_CAMPAIGN_CLAIMS: u32 = 1_000;
+pub const MAX_CAMPAIGNS_PER_PROGRAMME: u64 = 100;
+const CAMPAIGN_CLAIM_STORAGE_BYTES: u128 = 512;
 
 const CREATE_CALLBACK_GAS: Gas = Gas::from_tgas(40);
 const OP_CALLBACK_GAS: Gas = Gas::from_tgas(15);
@@ -51,10 +57,18 @@ const EXECUTE_OVERHEAD_GAS: Gas = Gas::from_tgas(15);
 const PAYOUT_CALLBACK_GAS: Gas = Gas::from_tgas(10);
 
 /// Points needed for each tier, lowest first.
-pub const TIERS: [(&str, u32); 4] = [("Bronze", 0), ("Silver", 30), ("Gold", 80), ("Platinum", 150)];
+pub const TIERS: [(&str, u32); 4] = [
+    ("Bronze", 0),
+    ("Silver", 30),
+    ("Gold", 80),
+    ("Platinum", 150),
+];
 
 pub fn tier_for(points: u32) -> usize {
-    TIERS.iter().rposition(|(_, min)| points >= *min).unwrap_or(0)
+    TIERS
+        .iter()
+        .rposition(|(_, min)| points >= *min)
+        .unwrap_or(0)
 }
 
 // ------------------------------------------------------------------------------------- state
@@ -75,6 +89,69 @@ enum StorageKey {
     Listings,
     Owed,
     Achievements,
+    // Append new storage prefixes only. Existing enum discriminants are part of deployed state.
+    ProgrammeContent,
+    Campaigns,
+    CampaignSequences,
+    CampaignClaims,
+    CampaignOwed,
+}
+
+/// Content entered by a programme's creator and stored with the registry.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgrammeContent {
+    pub label: String,
+    pub summary: String,
+    pub companion_name: String,
+    pub companion_tone: String,
+    pub benefits: Vec<ContentBenefit>,
+    pub posts: Vec<ContentPost>,
+    pub knowledge: Vec<ContentKnowledge>,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContentBenefit {
+    pub text: String,
+    pub min_tier: u8,
+}
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContentPost {
+    pub title: String,
+    pub body: String,
+    pub min_tier: u8,
+}
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContentKnowledge {
+    pub title: String,
+    pub body: String,
+}
+
+/// Bounded, creator-funded campaign. The budget is reserved at creation; each pass can claim once.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RewardCampaign {
+    pub id: U64,
+    pub programme_id: u32,
+    pub title: String,
+    pub reward_per_pass: U128,
+    pub max_claims: u32,
+    pub claimed: u32,
+    pub min_tier: u8,
+    pub starts_at_ms: U64,
+    pub ends_at_ms: U64,
+    pub remaining_budget: U128,
+    pub storage_reserve: U128,
+    pub closed: bool,
+}
+
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct NftPayout {
+    pub payout: HashMap<AccountId, U128>,
 }
 
 #[near(serializers = [borsh, json])]
@@ -218,7 +295,11 @@ pub struct Registry {
 
 #[ext_contract(ext_pass_account)]
 pub trait PassAccountExt {
-    fn execute_transfer(&self, #[serializer(borsh)] receiver_id: AccountId, #[serializer(borsh)] amount: u128) -> Promise;
+    fn execute_transfer(
+        &self,
+        #[serializer(borsh)] receiver_id: AccountId,
+        #[serializer(borsh)] amount: u128,
+    ) -> Promise;
     fn execute_call(
         &self,
         #[serializer(borsh)] receiver_id: AccountId,
@@ -272,6 +353,9 @@ pub struct AccountingView {
 #[near(serializers = [json])]
 pub struct ConfigView {
     pub pass_code_hash: Base58CryptoHash,
+    pub creator_royalty_bps: u16,
+    pub storage_byte_cost: U128,
+    pub campaign_claim_storage_bytes: u32,
     pub account_seed: U128,
     pub list_deposit: U128,
     pub lock_timeout_blocks: U64,
@@ -286,6 +370,35 @@ pub struct ConfigView {
 
 #[near]
 impl Registry {
+    fn payout_for(
+        &self,
+        token_id: &TokenId,
+        balance: u128,
+        max_len_payout: Option<u32>,
+    ) -> NftPayout {
+        let owner = self.owner_of(token_id);
+        let pass = self.pass_or_panic(token_id);
+        let programme = self.programme_or_panic(pass.programme_id);
+        // Split before multiplying so even U128::MAX balances cannot overflow.
+        let royalty = (balance / 10_000) * CREATOR_ROYALTY_BPS as u128
+            + ((balance % 10_000) * CREATOR_ROYALTY_BPS as u128) / 10_000;
+        let mut payout = HashMap::new();
+        if programme.creator == owner {
+            payout.insert(owner, U128(balance));
+        } else {
+            if royalty > 0 {
+                payout.insert(programme.creator, U128(royalty));
+            }
+            payout.insert(owner, U128(balance - royalty));
+        }
+        let max_len = max_len_payout.unwrap_or(10);
+        require!(
+            payout.len() <= max_len as usize,
+            "payout exceeds max_len_payout"
+        );
+        NftPayout { payout }
+    }
+
     #[init]
     pub fn new(pass_code_hash: Base58CryptoHash) -> Self {
         let metadata = NFTContractMetadata {
@@ -341,12 +454,24 @@ impl Registry {
         max_supply: Option<u32>,
     ) -> u32 {
         let creator = env::predecessor_account_id();
-        require!(!self.is_pass_account(&creator), "a pass account cannot create a programme");
-        require!(!name.is_empty() && name.len() <= 64, "name must be 1 to 64 bytes");
+        require!(
+            !self.is_pass_account(&creator),
+            "a pass account cannot create a programme"
+        );
+        require!(
+            !name.is_empty() && name.len() <= 64,
+            "name must be 1 to 64 bytes"
+        );
         require!(description.len() <= 280, "description is at most 280 bytes");
         require!(referral_bps <= MAX_REFERRAL_BPS, "referral share above 20%");
-        require!(member_share_bps <= MAX_MEMBER_SHARE_BPS, "member share above 80%");
-        require!(max_supply.map_or(true, |m| m > 0), "max supply must be positive");
+        require!(
+            member_share_bps <= MAX_MEMBER_SHARE_BPS,
+            "member share above 80%"
+        );
+        require!(
+            max_supply.map_or(true, |m| m > 0),
+            "max supply must be positive"
+        );
         let referral = mint_price.0 * referral_bps as u128 / 10_000;
         require!(
             mint_price.0 >= ACCOUNT_SEED + referral + MIN_MINT_HEADROOM,
@@ -378,9 +503,12 @@ impl Registry {
         };
         self.programmes.insert(&id, &p);
         self.charge_storage(before, &creator);
-        emit("programme_created", json!({ "programme_id": id, "creator": creator, "name": p.name,
+        emit(
+            "programme_created",
+            json!({ "programme_id": id, "creator": creator, "name": p.name,
             "mint_price": mint_price, "referral_bps": referral_bps, "member_share_bps": member_share_bps,
-            "max_supply": max_supply }));
+            "max_supply": max_supply }),
+        );
         id
     }
 
@@ -391,16 +519,31 @@ impl Registry {
     #[payable]
     pub fn mint(&mut self, programme_id: u32, referrer_token_id: Option<TokenId>) -> Promise {
         let minter = env::predecessor_account_id();
-        require!(!self.is_pass_account(&minter), "a pass account cannot hold a pass");
+        require!(
+            !self.is_pass_account(&minter),
+            "a pass account cannot hold a pass"
+        );
         let mut p = self.programme_or_panic(programme_id);
-        require!(env::attached_deposit().as_yoctonear() == p.mint_price.0, "attach exactly the mint price");
+        require!(
+            env::attached_deposit().as_yoctonear() == p.mint_price.0,
+            "attach exactly the mint price"
+        );
         if let Some(max) = p.max_supply {
             require!(p.minted < max, "programme is sold out");
         }
         if let Some(referrer) = &referrer_token_id {
-            let rp = self.passes.get(referrer).unwrap_or_else(|| env::panic_str("unknown referrer pass"));
-            require!(rp.programme_id == programme_id, "referrer pass is from another programme");
-            require!(self.owner_of(referrer) != minter, "a pass cannot refer its own holder");
+            let rp = self
+                .passes
+                .get(referrer)
+                .unwrap_or_else(|| env::panic_str("unknown referrer pass"));
+            require!(
+                rp.programme_id == programme_id,
+                "referrer pass is from another programme"
+            );
+            require!(
+                self.owner_of(referrer) != minter,
+                "a pass cannot refer its own holder"
+            );
         }
         let token_id = self.next_token_id.to_string();
         self.next_token_id += 1;
@@ -409,25 +552,40 @@ impl Registry {
         let price = p.mint_price.0;
         self.pending_mints.insert(
             &token_id,
-            &PendingMint { minter: minter.clone(), programme_id, referrer: referrer_token_id.clone(), price },
+            &PendingMint {
+                minter: minter.clone(),
+                programme_id,
+                referrer: referrer_token_id.clone(),
+                price,
+            },
         );
         // The seed leaves with the account batch; the rest is held until the callback.
         self.totals.pending_mints += price - ACCOUNT_SEED;
         let account = self.pass_account_id(&token_id);
-        emit("pass_mint_started", json!({ "token_id": token_id, "account_id": account, "minter": minter,
-            "programme_id": programme_id, "referrer_token_id": referrer_token_id }));
+        emit(
+            "pass_mint_started",
+            json!({ "token_id": token_id, "account_id": account, "minter": minter,
+            "programme_id": programme_id, "referrer_token_id": referrer_token_id }),
+        );
         Promise::new(account)
             .create_account()
             .use_global_contract(self.pass_code_hash)
             .transfer(NearToken::from_yoctonear(ACCOUNT_SEED))
-            .then(Self::ext(env::current_account_id()).with_static_gas(CREATE_CALLBACK_GAS).on_pass_account_created(token_id))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(CREATE_CALLBACK_GAS)
+                    .on_pass_account_created(token_id),
+            )
     }
 
     /// Finishes a mint. On success the NFT is minted and linked to its account; on failure no NFT
     /// exists, the minter is refunded and the seed (refunded to us by the protocol) is owed to them.
     #[private]
     pub fn on_pass_account_created(&mut self, token_id: TokenId) -> bool {
-        let pm = self.pending_mints.get(&token_id).unwrap_or_else(|| env::panic_str("no pending mint"));
+        let pm = self
+            .pending_mints
+            .get(&token_id)
+            .unwrap_or_else(|| env::panic_str("no pending mint"));
         self.pending_mints.remove(&token_id);
         self.totals.pending_mints -= pm.price - ACCOUNT_SEED;
         let mut p = self.programme_or_panic(pm.programme_id);
@@ -436,9 +594,13 @@ impl Registry {
             p.minted -= 1;
             self.programmes.insert(&p.id, &p);
             self.credit_owed(&pm.minter, ACCOUNT_SEED);
-            emit("pass_mint_failed", json!({ "token_id": token_id, "minter": pm.minter,
-                "refunded": U128(pm.price - ACCOUNT_SEED), "owed": U128(ACCOUNT_SEED) }));
-            self.pay(pm.minter, pm.price - ACCOUNT_SEED, "mint refund").detach();
+            emit(
+                "pass_mint_failed",
+                json!({ "token_id": token_id, "minter": pm.minter,
+                "refunded": U128(pm.price - ACCOUNT_SEED), "owed": U128(ACCOUNT_SEED) }),
+            );
+            self.pay(pm.minter, pm.price - ACCOUNT_SEED, "mint refund")
+                .detach();
             return false;
         }
 
@@ -460,7 +622,12 @@ impl Registry {
             minted_at_ms: now_ms,
         };
         let metadata = self.build_metadata(&token_id, &pass, &p, now_ms);
-        self.tokens.internal_mint_with_refund(token_id.clone(), pm.minter.clone(), Some(metadata), None);
+        self.tokens.internal_mint_with_refund(
+            token_id.clone(),
+            pm.minter.clone(),
+            Some(metadata),
+            None,
+        );
         self.passes.insert(&token_id, &pass);
         p.active_passes += 1;
 
@@ -481,15 +648,27 @@ impl Registry {
         self.programmes.insert(&p.id, &p);
 
         let account = self.pass_account_id(&token_id);
-        NftMint { owner_id: &pm.minter, token_ids: &[&token_id], memo: None }.emit();
-        emit("pass_account_created", json!({ "token_id": token_id, "account_id": account,
+        NftMint {
+            owner_id: &pm.minter,
+            token_ids: &[&token_id],
+            memo: None,
+        }
+        .emit();
+        emit(
+            "pass_account_created",
+            json!({ "token_id": token_id, "account_id": account,
             "controller": pm.minter, "owner_epoch": 1, "seed": U128(ACCOUNT_SEED),
-            "programme_id": p.id, "storage_cost": U128(storage), "treasury_share": U128(creator_share) }));
+            "programme_id": p.id, "storage_cost": U128(storage), "treasury_share": U128(creator_share) }),
+        );
         if let Some(referrer) = pm.referrer {
             if commission > 0 {
-                emit("referral_paid", json!({ "token_id": referrer, "account_id": self.pass_account_id(&referrer),
-                    "from_token_id": token_id, "amount": U128(commission) }));
-                self.pay_pass_account(&referrer, commission, "referral").detach();
+                emit(
+                    "referral_paid",
+                    json!({ "token_id": referrer, "account_id": self.pass_account_id(&referrer),
+                    "from_token_id": token_id, "amount": U128(commission) }),
+                );
+                self.pay_pass_account(&referrer, commission, "referral")
+                    .detach();
             }
         }
         true
@@ -499,13 +678,22 @@ impl Registry {
 
     /// Send NEAR from the pass's own account. Current owner only. Locks the pass until it settles.
     #[payable]
-    pub fn account_transfer(&mut self, token_id: TokenId, receiver_id: AccountId, amount: U128) -> Promise {
+    pub fn account_transfer(
+        &mut self,
+        token_id: TokenId,
+        receiver_id: AccountId,
+        amount: U128,
+    ) -> Promise {
         assert_one_yocto();
         self.begin_account_op(&token_id, "transfer", &receiver_id, amount.0);
         ext_pass_account::ext(self.pass_account_id(&token_id))
             .with_static_gas(EXECUTE_OVERHEAD_GAS)
             .execute_transfer(receiver_id, amount.0)
-            .then(Self::ext(env::current_account_id()).with_static_gas(OP_CALLBACK_GAS).on_account_op(token_id, "transfer".into()))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(OP_CALLBACK_GAS)
+                    .on_account_op(token_id, "transfer".into()),
+            )
     }
 
     /// Call any contract as the pass's own account. Current owner only. Locks the pass until the
@@ -522,13 +710,28 @@ impl Registry {
     ) -> Promise {
         assert_one_yocto();
         let forward = Gas::from_gas(gas.0);
-        require!(forward <= MAX_ACCOUNT_CALL_GAS, "gas above the account-call limit");
-        require!(!method_name.is_empty() && method_name.len() <= 64, "invalid method name");
-        self.begin_account_op(&token_id, &format!("call:{method_name}"), &receiver_id, deposit.0);
+        require!(
+            forward <= MAX_ACCOUNT_CALL_GAS,
+            "gas above the account-call limit"
+        );
+        require!(
+            !method_name.is_empty() && method_name.len() <= 64,
+            "invalid method name"
+        );
+        self.begin_account_op(
+            &token_id,
+            &format!("call:{method_name}"),
+            &receiver_id,
+            deposit.0,
+        );
         ext_pass_account::ext(self.pass_account_id(&token_id))
             .with_static_gas(forward.saturating_add(EXECUTE_OVERHEAD_GAS))
             .execute_call(receiver_id, method_name.clone(), args.0, deposit.0, gas.0)
-            .then(Self::ext(env::current_account_id()).with_static_gas(OP_CALLBACK_GAS).on_account_op(token_id, method_name))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(OP_CALLBACK_GAS)
+                    .on_account_op(token_id, method_name),
+            )
     }
 
     /// Clears the account-operation lock whether the operation succeeded or failed.
@@ -536,19 +739,37 @@ impl Registry {
     pub fn on_account_op(&mut self, token_id: TokenId, op: String) -> bool {
         let ok = is_promise_success();
         self.locks.remove(&token_id);
-        emit("account_op_finished", json!({ "token_id": token_id, "op": op, "succeeded": ok }));
+        emit(
+            "account_op_finished",
+            json!({ "token_id": token_id, "op": op, "succeeded": ok }),
+        );
         ok
     }
 
     /// Backstop for a lock whose callback never ran. Current owner only, only for account
     /// operations, only after `LOCK_TIMEOUT_BLOCKS`.
     pub fn clear_stale_lock(&mut self, token_id: TokenId) {
-        require!(env::predecessor_account_id() == self.owner_of(&token_id), "only the current holder can clear a lock");
-        let lock = self.locks.get(&token_id).unwrap_or_else(|| env::panic_str("pass is not locked"));
-        require!(lock.kind == LockKind::AccountOp, "only account-operation locks can be cleared");
-        require!(env::block_height() >= lock.since_block.0 + LOCK_TIMEOUT_BLOCKS, "lock is not stale yet");
+        require!(
+            env::predecessor_account_id() == self.owner_of(&token_id),
+            "only the current holder can clear a lock"
+        );
+        let lock = self
+            .locks
+            .get(&token_id)
+            .unwrap_or_else(|| env::panic_str("pass is not locked"));
+        require!(
+            lock.kind == LockKind::AccountOp,
+            "only account-operation locks can be cleared"
+        );
+        require!(
+            env::block_height() >= lock.since_block.0 + LOCK_TIMEOUT_BLOCKS,
+            "lock is not stale yet"
+        );
         self.locks.remove(&token_id);
-        emit("lock_cleared", json!({ "token_id": token_id, "since_block": lock.since_block }));
+        emit(
+            "lock_cleared",
+            json!({ "token_id": token_id, "since_block": lock.since_block }),
+        );
     }
 
     // --------------------------------------------------------------------------- events and tickets
@@ -566,21 +787,43 @@ impl Registry {
     ) -> u64 {
         let caller = env::predecessor_account_id();
         let mut p = self.programme_or_panic(programme_id);
-        require!(caller == p.creator, "only the programme creator can create events");
-        require!(!title.is_empty() && title.len() <= 80, "title must be 1 to 80 bytes");
+        require!(
+            caller == p.creator,
+            "only the programme creator can create events"
+        );
+        require!(
+            !title.is_empty() && title.len() <= 80,
+            "title must be 1 to 80 bytes"
+        );
         require!(price.0 >= MIN_TICKET_PRICE, "ticket price below 0.02 NEAR");
-        require!(capacity > 0 && capacity <= MAX_EVENT_CAPACITY, "capacity must be 1 to 10000");
+        require!(
+            capacity > 0 && capacity <= MAX_EVENT_CAPACITY,
+            "capacity must be 1 to 10000"
+        );
         require!(points <= MAX_EVENT_POINTS, "event points above 50");
         let before = env::storage_usage();
         let id = self.next_event_id;
         self.next_event_id += 1;
-        let event = Event { id, programme_id, title, price, capacity, sold: 0, points, starts_at_ms, checked_in: 0 };
+        let event = Event {
+            id,
+            programme_id,
+            title,
+            price,
+            capacity,
+            sold: 0,
+            points,
+            starts_at_ms,
+            checked_in: 0,
+        };
         self.events.insert(&id, &event);
         p.events += 1;
         self.programmes.insert(&programme_id, &p);
         self.charge_storage(before, &caller);
-        emit("event_created", json!({ "event_id": id, "programme_id": programme_id, "title": event.title,
-            "price": price, "capacity": capacity, "points": points, "starts_at_ms": starts_at_ms }));
+        emit(
+            "event_created",
+            json!({ "event_id": id, "programme_id": programme_id, "title": event.title,
+            "price": price, "capacity": capacity, "points": points, "starts_at_ms": starts_at_ms }),
+        );
         id
     }
 
@@ -590,24 +833,50 @@ impl Registry {
     #[payable]
     pub fn buy_ticket(&mut self, event_id: u64, token_id: Option<TokenId>) {
         let buyer = env::predecessor_account_id();
-        let mut event = self.events.get(&event_id).unwrap_or_else(|| env::panic_str("unknown event"));
+        let mut event = self
+            .events
+            .get(&event_id)
+            .unwrap_or_else(|| env::panic_str("unknown event"));
         let price = event.price.0;
-        require!(env::attached_deposit().as_yoctonear() == price, "attach exactly the ticket price");
+        require!(
+            env::attached_deposit().as_yoctonear() == price,
+            "attach exactly the ticket price"
+        );
         require!(event.sold < event.capacity, "event is sold out");
         let key = format!("{event_id}:{buyer}");
-        require!(self.tickets.get(&key).is_none(), "you already hold a ticket for this event");
+        require!(
+            self.tickets.get(&key).is_none(),
+            "you already hold a ticket for this event"
+        );
         let before = env::storage_usage();
         if let Some(t) = &token_id {
-            require!(self.owner_of(t) == buyer, "only the pass holder can attach a ticket to it");
+            require!(
+                self.owner_of(t) == buyer,
+                "only the pass holder can attach a ticket to it"
+            );
             let mut pass = self.pass_or_panic(t);
-            require!(pass.programme_id == event.programme_id, "pass is from another programme");
+            require!(
+                pass.programme_id == event.programme_id,
+                "pass is from another programme"
+            );
             let pkey = format!("{event_id}:{t}");
-            require!(self.pass_tickets.get(&pkey).is_none(), "this pass already has a ticket for this event");
+            require!(
+                self.pass_tickets.get(&pkey).is_none(),
+                "this pass already has a ticket for this event"
+            );
             self.pass_tickets.insert(&pkey, &buyer);
             pass.tickets += 1;
             self.passes.insert(t, &pass);
         }
-        self.tickets.insert(&key, &Ticket { event_id, buyer: buyer.clone(), token_id: token_id.clone(), checked_in: false });
+        self.tickets.insert(
+            &key,
+            &Ticket {
+                event_id,
+                buyer: buyer.clone(),
+                token_id: token_id.clone(),
+                checked_in: false,
+            },
+        );
         event.sold += 1;
         self.events.insert(&event_id, &event);
 
@@ -615,13 +884,19 @@ impl Registry {
         let storage = self.storage_cost_since(before);
         let member_share = price * p.member_share_bps as u128 / 10_000;
         let creator_part = price - member_share;
-        require!(creator_part >= storage, "ticket price does not cover storage");
+        require!(
+            creator_part >= storage,
+            "ticket price does not cover storage"
+        );
         p.ticket_revenue_total = U128(p.ticket_revenue_total.0 + price);
         p.treasury = U128(p.treasury.0 + creator_part - storage);
         self.totals.treasury += creator_part - storage;
-        emit("ticket_purchased", json!({ "event_id": event_id, "programme_id": p.id, "buyer": buyer,
+        emit(
+            "ticket_purchased",
+            json!({ "event_id": event_id, "programme_id": p.id, "buyer": buyer,
             "token_id": token_id, "price": U128(price), "member_share": U128(member_share),
-            "treasury_share": U128(creator_part - storage) }));
+            "treasury_share": U128(creator_part - storage) }),
+        );
         self.distribute(&mut p, member_share, "ticket");
         self.programmes.insert(&p.id, &p);
     }
@@ -631,15 +906,24 @@ impl Registry {
     #[payable]
     pub fn check_in(&mut self, event_id: u64, token_id: TokenId) {
         let caller = env::predecessor_account_id();
-        let mut event = self.events.get(&event_id).unwrap_or_else(|| env::panic_str("unknown event"));
+        let mut event = self
+            .events
+            .get(&event_id)
+            .unwrap_or_else(|| env::panic_str("unknown event"));
         let p = self.programme_or_panic(event.programme_id);
-        require!(caller == p.creator, "only the programme creator can check in");
+        require!(
+            caller == p.creator,
+            "only the programme creator can check in"
+        );
         let buyer = self
             .pass_tickets
             .get(&format!("{event_id}:{token_id}"))
             .unwrap_or_else(|| env::panic_str("this pass has no ticket for this event"));
         let key = format!("{event_id}:{buyer}");
-        let mut ticket = self.tickets.get(&key).unwrap_or_else(|| env::panic_str("ticket missing"));
+        let mut ticket = self
+            .tickets
+            .get(&key)
+            .unwrap_or_else(|| env::panic_str("ticket missing"));
         require!(!ticket.checked_in, "already checked in");
         let before = env::storage_usage();
         ticket.checked_in = true;
@@ -649,7 +933,10 @@ impl Registry {
         let mut pass = self.pass_or_panic(&token_id);
         pass.check_ins += 1;
         self.passes.insert(&token_id, &pass);
-        emit("checked_in", json!({ "event_id": event_id, "token_id": token_id, "points": event.points }));
+        emit(
+            "checked_in",
+            json!({ "event_id": event_id, "token_id": token_id, "points": event.points }),
+        );
         self.add_points(&token_id, event.points, "check_in");
         self.charge_storage(before, &caller);
     }
@@ -660,18 +947,342 @@ impl Registry {
         let caller = env::predecessor_account_id();
         let mut pass = self.pass_or_panic(&token_id);
         let p = self.programme_or_panic(pass.programme_id);
-        require!(caller == p.creator, "only the programme creator can award achievements");
-        require!(!code.is_empty() && code.len() <= 32, "code must be 1 to 32 bytes");
-        require!(points > 0 && points <= MAX_ACHIEVEMENT_POINTS, "achievement points must be 1 to 50");
+        require!(
+            caller == p.creator,
+            "only the programme creator can award achievements"
+        );
+        require!(
+            !code.is_empty() && code.len() <= 32,
+            "code must be 1 to 32 bytes"
+        );
+        require!(
+            points > 0 && points <= MAX_ACHIEVEMENT_POINTS,
+            "achievement points must be 1 to 50"
+        );
         let key = format!("{token_id}:{code}");
-        require!(!self.achievements.contains(&key), "achievement already awarded to this pass");
+        require!(
+            !self.achievements.contains(&key),
+            "achievement already awarded to this pass"
+        );
         let before = env::storage_usage();
         self.achievements.insert(&key);
         pass.achievements += 1;
         self.passes.insert(&token_id, &pass);
-        emit("achievement_awarded", json!({ "token_id": token_id, "code": code, "points": points }));
+        emit(
+            "achievement_awarded",
+            json!({ "token_id": token_id, "code": code, "points": points }),
+        );
         self.add_points(&token_id, points, "achievement");
         self.charge_storage(before, &caller);
+    }
+
+    // ------------------------------------------------------------------------ creator content
+
+    /// Store member content on chain. Each benefit/post tier is an index into TIERS.
+    #[payable]
+    pub fn set_programme_content(&mut self, programme_id: u32, content: ProgrammeContent) {
+        let caller = env::predecessor_account_id();
+        let p = self.programme_or_panic(programme_id);
+        require!(
+            caller == p.creator,
+            "only the programme creator can edit content"
+        );
+        require!(
+            !content.label.is_empty() && content.label.len() <= 80,
+            "label must be 1 to 80 bytes"
+        );
+        require!(
+            content.summary.len() <= 1_000,
+            "summary is at most 1000 bytes"
+        );
+        require!(
+            !content.companion_name.is_empty() && content.companion_name.len() <= 64,
+            "companion name must be 1 to 64 bytes"
+        );
+        require!(
+            content.companion_tone.len() <= 280,
+            "companion tone is at most 280 bytes"
+        );
+        require!(
+            content.benefits.len() <= 20
+                && content.posts.len() <= 50
+                && content.knowledge.len() <= 50,
+            "too many content entries"
+        );
+        require!(
+            content.benefits.iter().all(|x| !x.text.is_empty()
+                && x.text.len() <= 280
+                && x.min_tier < TIERS.len() as u8),
+            "invalid benefit"
+        );
+        require!(
+            content.posts.iter().all(|x| !x.title.is_empty()
+                && x.title.len() <= 120
+                && x.body.len() <= 10_000
+                && x.min_tier < TIERS.len() as u8),
+            "invalid post"
+        );
+        require!(
+            content
+                .knowledge
+                .iter()
+                .all(|x| !x.title.is_empty() && x.title.len() <= 120 && x.body.len() <= 4_000),
+            "invalid knowledge entry"
+        );
+        let before = env::storage_usage();
+        LookupMap::<u32, ProgrammeContent>::new(StorageKey::ProgrammeContent)
+            .insert(&programme_id, &content);
+        self.charge_storage(before, &caller);
+        emit(
+            "programme_content_updated",
+            json!({ "programme_id": programme_id }),
+        );
+    }
+
+    pub fn programme_content(&self, programme_id: u32) -> Option<ProgrammeContent> {
+        LookupMap::<u32, ProgrammeContent>::new(StorageKey::ProgrammeContent).get(&programme_id)
+    }
+
+    // ------------------------------------------------------------------------ reward campaigns
+
+    /// Create a tier-gated campaign with an expiry. Attach reward_per_pass * max_claims plus
+    /// storage for the campaign and its one-time claim markers. Unused funds are reclaimable after
+    /// expiry or when the campaign reaches its claim limit.
+    #[payable]
+    pub fn create_reward_campaign(
+        &mut self,
+        programme_id: u32,
+        title: String,
+        reward_per_pass: U128,
+        max_claims: u32,
+        min_tier: u8,
+        starts_at_ms: U64,
+        ends_at_ms: U64,
+    ) -> U64 {
+        let caller = env::predecessor_account_id();
+        let p = self.programme_or_panic(programme_id);
+        require!(
+            caller == p.creator,
+            "only the programme creator can create campaigns"
+        );
+        require!(
+            !title.is_empty() && title.len() <= 80,
+            "title must be 1 to 80 bytes"
+        );
+        require!(reward_per_pass.0 > 0, "reward per pass must be positive");
+        require!(
+            max_claims > 0 && max_claims <= MAX_CAMPAIGN_CLAIMS,
+            "max claims must be 1 to 1000"
+        );
+        require!(min_tier < TIERS.len() as u8, "unknown minimum tier");
+        require!(
+            starts_at_ms.0 < ends_at_ms.0 && ends_at_ms.0 > env::block_timestamp_ms(),
+            "campaign dates are invalid or already expired"
+        );
+        let budget = reward_per_pass
+            .0
+            .checked_mul(max_claims as u128)
+            .unwrap_or_else(|| env::panic_str("campaign budget overflow"));
+        let claim_reserve = env::storage_byte_cost()
+            .as_yoctonear()
+            .checked_mul(CAMPAIGN_CLAIM_STORAGE_BYTES)
+            .and_then(|x| x.checked_mul(max_claims as u128))
+            .unwrap_or_else(|| env::panic_str("campaign storage reserve overflow"));
+        let mut sequences = LookupMap::<u32, u64>::new(StorageKey::CampaignSequences);
+        let id = sequences
+            .get(&programme_id)
+            .unwrap_or(0)
+            .checked_add(1)
+            .unwrap_or_else(|| env::panic_str("campaign id overflow"));
+        require!(
+            id <= MAX_CAMPAIGNS_PER_PROGRAMME,
+            "programme campaign limit reached"
+        );
+        let key = campaign_key(programme_id, id);
+        let before = env::storage_usage();
+        let mut campaign = RewardCampaign {
+            id: U64(id),
+            programme_id,
+            title,
+            reward_per_pass,
+            max_claims,
+            claimed: 0,
+            min_tier,
+            starts_at_ms,
+            ends_at_ms,
+            remaining_budget: U128(budget),
+            storage_reserve: U128(claim_reserve),
+            closed: false,
+        };
+        LookupMap::<String, RewardCampaign>::new(StorageKey::Campaigns).insert(&key, &campaign);
+        sequences.insert(&programme_id, &id);
+        let storage = self.storage_cost_since(before);
+        let required = budget
+            .checked_add(claim_reserve)
+            .and_then(|x| x.checked_add(storage))
+            .unwrap_or_else(|| env::panic_str("campaign funding overflow"));
+        let attached = env::attached_deposit().as_yoctonear();
+        require!(
+            attached >= required,
+            format!("attach at least {required} yoctoNEAR for campaign funding and storage")
+        );
+        self.totals.reserved += budget + claim_reserve;
+        campaign.storage_reserve = U128(claim_reserve);
+        emit(
+            "reward_campaign_created",
+            json!({ "programme_id": programme_id, "campaign_id": id,
+            "budget": U128(budget), "reward_per_pass": reward_per_pass, "max_claims": max_claims,
+            "min_tier": TIERS[min_tier as usize].0, "starts_at_ms": starts_at_ms, "ends_at_ms": ends_at_ms }),
+        );
+        if attached > required {
+            Promise::new(caller)
+                .transfer(NearToken::from_yoctonear(attached - required))
+                .detach();
+        }
+        U64(id)
+    }
+
+    pub fn reward_campaign(&self, programme_id: u32, campaign_id: U64) -> Option<RewardCampaign> {
+        LookupMap::<String, RewardCampaign>::new(StorageKey::Campaigns)
+            .get(&campaign_key(programme_id, campaign_id.0))
+    }
+
+    pub fn reward_campaigns(&self, programme_id: u32) -> Vec<RewardCampaign> {
+        let next = LookupMap::<u32, u64>::new(StorageKey::CampaignSequences)
+            .get(&programme_id)
+            .unwrap_or(0);
+        let campaigns = LookupMap::<String, RewardCampaign>::new(StorageKey::Campaigns);
+        (1..=next)
+            .filter_map(|id| campaigns.get(&campaign_key(programme_id, id)))
+            .collect()
+    }
+
+    pub fn has_claimed_campaign(
+        &self,
+        programme_id: u32,
+        campaign_id: U64,
+        token_id: TokenId,
+    ) -> bool {
+        LookupSet::<String>::new(StorageKey::CampaignClaims).contains(&campaign_claim_key(
+            programme_id,
+            campaign_id.0,
+            &token_id,
+        ))
+    }
+
+    /// Anyone can trigger a valid claim; value always goes to the pass account. Claim storage is
+    /// funded from the campaign reserve, and the claim lock is token-scoped and one-time.
+    pub fn claim_campaign(
+        &mut self,
+        programme_id: u32,
+        campaign_id: U64,
+        token_id: TokenId,
+    ) -> Promise {
+        let key = campaign_key(programme_id, campaign_id.0);
+        let mut campaigns = LookupMap::<String, RewardCampaign>::new(StorageKey::Campaigns);
+        let mut campaign = campaigns
+            .get(&key)
+            .unwrap_or_else(|| env::panic_str("unknown campaign"));
+        require!(!campaign.closed, "campaign is closed");
+        let now = env::block_timestamp_ms();
+        require!(
+            now >= campaign.starts_at_ms.0 && now < campaign.ends_at_ms.0,
+            "campaign is not active"
+        );
+        require!(
+            campaign.claimed < campaign.max_claims,
+            "campaign has no claims remaining"
+        );
+        let pass = self.pass_or_panic(&token_id);
+        require!(
+            pass.programme_id == programme_id,
+            "pass is from another programme"
+        );
+        require!(
+            tier_for(pass.points) >= campaign.min_tier as usize,
+            "pass does not meet the campaign tier"
+        );
+        let marker = campaign_claim_key(programme_id, campaign_id.0, &token_id);
+        let mut claimed = LookupSet::<String>::new(StorageKey::CampaignClaims);
+        require!(
+            !claimed.contains(&marker),
+            "pass already claimed this campaign"
+        );
+        let before = env::storage_usage();
+        claimed.insert(&marker);
+        let marker_storage = self.storage_cost_since(before);
+        let claim_allowance =
+            env::storage_byte_cost().as_yoctonear() * CAMPAIGN_CLAIM_STORAGE_BYTES;
+        require!(
+            marker_storage <= claim_allowance && marker_storage <= campaign.storage_reserve.0,
+            "campaign claim storage reserve exceeded"
+        );
+        campaign.claimed += 1;
+        campaign.remaining_budget = U128(campaign.remaining_budget.0 - campaign.reward_per_pass.0);
+        campaign.storage_reserve = U128(campaign.storage_reserve.0 - marker_storage);
+        campaigns.insert(&key, &campaign);
+        self.totals.reserved -= campaign.reward_per_pass.0 + marker_storage;
+        // on_pass_payout records this as unpaid if transfer fails; it remains claimable then.
+        emit(
+            "campaign_claimed",
+            json!({ "programme_id": programme_id, "campaign_id": campaign_id,
+            "token_id": token_id, "account_id": self.pass_account_id(&token_id), "amount": campaign.reward_per_pass }),
+        );
+        self.pay_campaign_account(&token_id, campaign.reward_per_pass.0)
+    }
+
+    pub fn campaign_owed_to(&self, token_id: TokenId) -> U128 {
+        U128(
+            LookupMap::<TokenId, u128>::new(StorageKey::CampaignOwed)
+                .get(&token_id)
+                .unwrap_or(0),
+        )
+    }
+
+    /// Retry a campaign payout that previously failed. Anyone may trigger it; funds still go only
+    /// to the pass account.
+    pub fn claim_campaign_owed(&mut self, token_id: TokenId) -> Promise {
+        let mut owed = LookupMap::<TokenId, u128>::new(StorageKey::CampaignOwed);
+        let amount = owed.get(&token_id).unwrap_or(0);
+        require!(amount > 0, "no campaign rewards are owed");
+        owed.insert(&token_id, &0);
+        self.totals.reserved -= amount;
+        self.pay_campaign_account(&token_id, amount)
+    }
+
+    /// Creator reclaims unclaimed funds only after expiry or after every claim slot is used.
+    pub fn close_reward_campaign(&mut self, programme_id: u32, campaign_id: U64) -> bool {
+        let caller = env::predecessor_account_id();
+        let p = self.programme_or_panic(programme_id);
+        require!(
+            caller == p.creator,
+            "only the programme creator can close campaigns"
+        );
+        let key = campaign_key(programme_id, campaign_id.0);
+        let mut campaigns = LookupMap::<String, RewardCampaign>::new(StorageKey::Campaigns);
+        let mut campaign = campaigns
+            .get(&key)
+            .unwrap_or_else(|| env::panic_str("unknown campaign"));
+        require!(!campaign.closed, "campaign is already closed");
+        require!(
+            env::block_timestamp_ms() >= campaign.ends_at_ms.0
+                || campaign.claimed == campaign.max_claims,
+            "campaign is still active"
+        );
+        let refund = campaign.remaining_budget.0;
+        self.totals.reserved -= refund + campaign.storage_reserve.0;
+        campaign.remaining_budget = U128(0);
+        campaign.storage_reserve = U128(0);
+        campaign.closed = true;
+        campaigns.insert(&key, &campaign);
+        emit(
+            "reward_campaign_closed",
+            json!({ "programme_id": programme_id, "campaign_id": campaign_id, "refund": U128(refund) }),
+        );
+        if refund > 0 {
+            self.pay(caller, refund, "campaign refund").detach();
+        }
+        true
     }
 
     // --------------------------------------------------------------------------- rewards and treasury
@@ -680,7 +1291,10 @@ impl Registry {
     #[payable]
     pub fn fund_rewards(&mut self, programme_id: u32) {
         let mut p = self.programme_or_panic(programme_id);
-        require!(env::predecessor_account_id() == p.creator, "only the programme creator can fund rewards");
+        require!(
+            env::predecessor_account_id() == p.creator,
+            "only the programme creator can fund rewards"
+        );
         let amount = env::attached_deposit().as_yoctonear();
         require!(amount > 0, "attach the amount to distribute");
         require!(p.active_passes > 0, "no passes to reward yet");
@@ -704,8 +1318,11 @@ impl Registry {
         p.claimed_total = U128(p.claimed_total.0 + amount);
         self.programmes.insert(&p.id, &p);
         self.totals.reserved -= amount;
-        emit("rewards_claimed", json!({ "token_id": token_id, "account_id": self.pass_account_id(&token_id),
-            "amount": U128(amount) }));
+        emit(
+            "rewards_claimed",
+            json!({ "token_id": token_id, "account_id": self.pass_account_id(&token_id),
+            "amount": U128(amount) }),
+        );
         self.pay_pass_account(&token_id, amount, "rewards")
     }
 
@@ -713,14 +1330,20 @@ impl Registry {
     pub fn withdraw_treasury(&mut self, programme_id: u32, amount: Option<U128>) -> Promise {
         let caller = env::predecessor_account_id();
         let mut p = self.programme_or_panic(programme_id);
-        require!(caller == p.creator, "only the programme creator can withdraw the treasury");
+        require!(
+            caller == p.creator,
+            "only the programme creator can withdraw the treasury"
+        );
         let amount = amount.map_or(p.treasury.0, |a| a.0);
         require!(amount > 0, "nothing to withdraw");
         require!(amount <= p.treasury.0, "amount exceeds the treasury");
         p.treasury = U128(p.treasury.0 - amount);
         self.programmes.insert(&programme_id, &p);
         self.totals.treasury -= amount;
-        emit("treasury_withdrawn", json!({ "programme_id": programme_id, "to": caller, "amount": U128(amount) }));
+        emit(
+            "treasury_withdrawn",
+            json!({ "programme_id": programme_id, "to": caller, "amount": U128(amount) }),
+        );
         self.pay(caller, amount, "treasury")
     }
 
@@ -731,7 +1354,10 @@ impl Registry {
         require!(amount > 0, "nothing owed");
         self.owed.insert(&caller, &0);
         self.totals.owed -= amount;
-        emit("owed_claimed", json!({ "account_id": caller, "amount": U128(amount) }));
+        emit(
+            "owed_claimed",
+            json!({ "account_id": caller, "amount": U128(amount) }),
+        );
         self.pay(caller, amount, "owed")
     }
 
@@ -741,7 +1367,10 @@ impl Registry {
             return true;
         }
         self.credit_owed(&to, amount.0);
-        emit("payout_failed", json!({ "to": to, "amount": amount, "reason": reason }));
+        emit(
+            "payout_failed",
+            json!({ "to": to, "amount": amount, "reason": reason }),
+        );
         false
     }
 
@@ -758,7 +1387,26 @@ impl Registry {
         p.reserved = U128(p.reserved.0 + amount.0);
         self.programmes.insert(&p.id, &p);
         self.totals.reserved += amount.0;
-        emit("pass_payout_failed", json!({ "token_id": token_id, "amount": amount, "reason": reason }));
+        emit(
+            "pass_payout_failed",
+            json!({ "token_id": token_id, "amount": amount, "reason": reason }),
+        );
+        false
+    }
+
+    #[private]
+    pub fn on_campaign_payout(&mut self, token_id: TokenId, amount: U128) -> bool {
+        if is_promise_success() {
+            return true;
+        }
+        let mut owed = LookupMap::<TokenId, u128>::new(StorageKey::CampaignOwed);
+        let previous = owed.get(&token_id).unwrap_or(0);
+        owed.insert(&token_id, &(previous + amount.0));
+        self.totals.reserved += amount.0;
+        emit(
+            "campaign_payout_failed",
+            json!({ "token_id": token_id, "amount": amount }),
+        );
         false
     }
 
@@ -767,16 +1415,32 @@ impl Registry {
     /// List a pass. While listed, nothing can leave its account and it cannot move except by `buy`.
     #[payable]
     pub fn list(&mut self, token_id: TokenId, price: U128) -> U64 {
-        require!(env::attached_deposit().as_yoctonear() == LIST_DEPOSIT, "attach exactly the listing deposit (0.01 NEAR)");
+        require!(
+            env::attached_deposit().as_yoctonear() == LIST_DEPOSIT,
+            "attach exactly the listing deposit (0.01 NEAR)"
+        );
         let caller = env::predecessor_account_id();
-        require!(caller == self.owner_of(&token_id), "only the current holder can list");
+        require!(
+            caller == self.owner_of(&token_id),
+            "only the current holder can list"
+        );
         self.assert_idle(&token_id);
         require!(price.0 > 0, "price must be positive");
         let id = U64(self.next_listing_id);
         self.next_listing_id += 1;
-        self.listings.insert(&token_id, &Listing { id, seller: caller.clone(), price });
+        self.listings.insert(
+            &token_id,
+            &Listing {
+                id,
+                seller: caller.clone(),
+                price,
+            },
+        );
         self.totals.listing_deposits += LIST_DEPOSIT;
-        emit("pass_listed", json!({ "token_id": token_id, "listing_id": id, "seller": caller, "price": price }));
+        emit(
+            "pass_listed",
+            json!({ "token_id": token_id, "listing_id": id, "seller": caller, "price": price }),
+        );
         id
     }
 
@@ -784,11 +1448,17 @@ impl Registry {
     pub fn delist(&mut self, token_id: TokenId) -> Promise {
         assert_one_yocto();
         let caller = env::predecessor_account_id();
-        let listing = self.listings.get(&token_id).unwrap_or_else(|| env::panic_str("pass is not listed"));
+        let listing = self
+            .listings
+            .get(&token_id)
+            .unwrap_or_else(|| env::panic_str("pass is not listed"));
         require!(caller == listing.seller, "only the seller can delist");
         self.listings.remove(&token_id);
         self.totals.listing_deposits -= LIST_DEPOSIT;
-        emit("pass_delisted", json!({ "token_id": token_id, "listing_id": listing.id, "seller": caller }));
+        emit(
+            "pass_delisted",
+            json!({ "token_id": token_id, "listing_id": listing.id, "seller": caller }),
+        );
         self.pay(caller, LIST_DEPOSIT, "listing deposit")
     }
 
@@ -797,20 +1467,91 @@ impl Registry {
     #[payable]
     pub fn buy(&mut self, token_id: TokenId, listing_id: U64) -> Promise {
         let buyer = env::predecessor_account_id();
-        require!(!self.is_pass_account(&buyer), "a pass account cannot hold a pass");
-        let listing = self.listings.get(&token_id).unwrap_or_else(|| env::panic_str("pass is not listed"));
+        require!(
+            !self.is_pass_account(&buyer),
+            "a pass account cannot hold a pass"
+        );
+        let listing = self
+            .listings
+            .get(&token_id)
+            .unwrap_or_else(|| env::panic_str("pass is not listed"));
         require!(listing.id == listing_id, "listing changed; check it again");
         require!(self.locks.get(&token_id).is_none(), "pass is locked");
-        require!(env::attached_deposit().as_yoctonear() == listing.price.0, "attach exactly the listing price");
+        require!(
+            env::attached_deposit().as_yoctonear() == listing.price.0,
+            "attach exactly the listing price"
+        );
         require!(buyer != listing.seller, "seller cannot buy their own pass");
-        require!(self.owner_of(&token_id) == listing.seller, "listing is stale");
+        require!(
+            self.owner_of(&token_id) == listing.seller,
+            "listing is stale"
+        );
         self.listings.remove(&token_id);
         self.totals.listing_deposits -= LIST_DEPOSIT;
-        self.tokens.internal_transfer(&listing.seller, &buyer, &token_id, None, Some("crewpass sale".into()));
+        self.tokens.internal_transfer(
+            &listing.seller,
+            &buyer,
+            &token_id,
+            None,
+            Some("crewpass sale".into()),
+        );
         self.owner_changed(&token_id, &listing.seller, &buyer);
-        emit("pass_sold", json!({ "token_id": token_id, "listing_id": listing.id, "seller": listing.seller,
-            "buyer": buyer, "price": listing.price, "account_id": self.pass_account_id(&token_id) }));
-        self.pay(listing.seller, listing.price.0 + LIST_DEPOSIT, "sale")
+        emit(
+            "pass_sold",
+            json!({ "token_id": token_id, "listing_id": listing.id, "seller": listing.seller,
+            "buyer": buyer, "price": listing.price, "account_id": self.pass_account_id(&token_id) }),
+        );
+        let programme = self.programme_or_panic(self.pass_or_panic(&token_id).programme_id);
+        let royalty = (listing.price.0 / 10_000) * CREATOR_ROYALTY_BPS as u128
+            + ((listing.price.0 % 10_000) * CREATOR_ROYALTY_BPS as u128) / 10_000;
+        if royalty > 0 && programme.creator != listing.seller {
+            self.pay(programme.creator, royalty, "creator royalty")
+                .detach();
+            self.pay(
+                listing.seller,
+                listing.price.0 - royalty + LIST_DEPOSIT,
+                "sale",
+            )
+        } else {
+            self.pay(listing.seller, listing.price.0 + LIST_DEPOSIT, "sale")
+        }
+    }
+
+    // ------------------------------------------------------------------------ NEP-199 payouts
+
+    pub fn nft_payout(
+        &self,
+        token_id: TokenId,
+        balance: U128,
+        max_len_payout: Option<u32>,
+    ) -> NftPayout {
+        self.payout_for(&token_id, balance.0, max_len_payout)
+    }
+
+    /// NEP-199 transfer-and-payout. Marketplace contracts remain responsible for making the
+    /// returned payments; CrewPass's own `buy` method performs the same split itself.
+    #[payable]
+    pub fn nft_transfer_payout(
+        &mut self,
+        receiver_id: AccountId,
+        token_id: TokenId,
+        approval_id: Option<u64>,
+        memo: Option<String>,
+        balance: U128,
+        max_len_payout: Option<u32>,
+    ) -> NftPayout {
+        assert_one_yocto();
+        self.assert_idle(&token_id);
+        require!(
+            !self.is_pass_account(&receiver_id),
+            "a pass account cannot hold a pass"
+        );
+        let from = self.owner_of(&token_id);
+        let payout = self.payout_for(&token_id, balance.0, max_len_payout);
+        self.tokens
+            .nft_transfer(receiver_id.clone(), token_id.clone(), approval_id, memo);
+        self.owner_changed(&token_id, &from, &receiver_id);
+        payout
     }
 
     // --------------------------------------------------------------------------- views
@@ -863,14 +1604,22 @@ impl Registry {
     pub fn programmes(&self, from_id: Option<u32>, limit: Option<u32>) -> Vec<Programme> {
         let from = from_id.unwrap_or(1).max(1);
         let limit = limit.unwrap_or(50).min(100);
-        (from..self.next_programme_id).filter_map(|id| self.programmes.get(&id)).take(limit as usize).collect()
+        (from..self.next_programme_id)
+            .filter_map(|id| self.programmes.get(&id))
+            .take(limit as usize)
+            .collect()
     }
 
     pub fn event(&self, event_id: U64) -> Option<Event> {
         self.events.get(&event_id.0)
     }
 
-    pub fn events(&self, programme_id: Option<u32>, from_id: Option<U64>, limit: Option<u32>) -> Vec<Event> {
+    pub fn events(
+        &self,
+        programme_id: Option<u32>,
+        from_id: Option<U64>,
+        limit: Option<u32>,
+    ) -> Vec<Event> {
         let from = from_id.map_or(1, |f| f.0).max(1);
         let limit = limit.unwrap_or(50).min(100) as usize;
         (from..self.next_event_id)
@@ -885,7 +1634,9 @@ impl Registry {
     }
 
     pub fn pass_ticket(&self, event_id: U64, token_id: TokenId) -> Option<Ticket> {
-        let buyer = self.pass_tickets.get(&format!("{}:{token_id}", event_id.0))?;
+        let buyer = self
+            .pass_tickets
+            .get(&format!("{}:{token_id}", event_id.0))?;
         self.tickets.get(&format!("{}:{buyer}", event_id.0))
     }
 
@@ -900,6 +1651,9 @@ impl Registry {
     pub fn config(&self) -> ConfigView {
         ConfigView {
             pass_code_hash: self.pass_code_hash.into(),
+            creator_royalty_bps: CREATOR_ROYALTY_BPS,
+            storage_byte_cost: U128(env::storage_byte_cost().as_yoctonear()),
+            campaign_claim_storage_bytes: CAMPAIGN_CLAIM_STORAGE_BYTES as u32,
             account_seed: U128(ACCOUNT_SEED),
             list_deposit: U128(LIST_DEPOSIT),
             lock_timeout_blocks: U64(LOCK_TIMEOUT_BLOCKS),
@@ -916,7 +1670,8 @@ impl Registry {
         let t = &self.totals;
         let balance = env::account_balance().as_yoctonear();
         let storage_cost = env::storage_byte_cost().as_yoctonear() * env::storage_usage() as u128;
-        let liabilities = t.treasury + t.reserved + t.carry + t.owed + t.listing_deposits + t.pending_mints;
+        let liabilities =
+            t.treasury + t.reserved + t.carry + t.owed + t.listing_deposits + t.pending_mints;
         AccountingView {
             balance: U128(balance),
             storage_cost: U128(storage_cost),
@@ -932,19 +1687,34 @@ impl Registry {
     }
 }
 
+fn campaign_key(programme_id: u32, campaign_id: u64) -> String {
+    format!("{programme_id}:{campaign_id}")
+}
+
+fn campaign_claim_key(programme_id: u32, campaign_id: u64, token_id: &str) -> String {
+    format!("{programme_id}:{campaign_id}:{token_id}")
+}
+
 // ------------------------------------------------------------------------------------- internals
 
 impl Registry {
     fn owner_of(&self, token_id: &TokenId) -> AccountId {
-        self.tokens.owner_by_id.get(token_id).unwrap_or_else(|| env::panic_str("unknown pass"))
+        self.tokens
+            .owner_by_id
+            .get(token_id)
+            .unwrap_or_else(|| env::panic_str("unknown pass"))
     }
 
     fn pass_or_panic(&self, token_id: &TokenId) -> Pass {
-        self.passes.get(token_id).unwrap_or_else(|| env::panic_str("unknown pass"))
+        self.passes
+            .get(token_id)
+            .unwrap_or_else(|| env::panic_str("unknown pass"))
     }
 
     fn programme_or_panic(&self, id: u32) -> Programme {
-        self.programmes.get(&id).unwrap_or_else(|| env::panic_str("unknown programme"))
+        self.programmes
+            .get(&id)
+            .unwrap_or_else(|| env::panic_str("unknown programme"))
     }
 
     pub fn pass_account_id(&self, token_id: &TokenId) -> AccountId {
@@ -955,7 +1725,9 @@ impl Registry {
 
     /// Any sub-account of the registry. Only the registry can create them, and only for passes.
     fn is_pass_account(&self, account: &AccountId) -> bool {
-        account.as_str().ends_with(&format!(".{}", env::current_account_id()))
+        account
+            .as_str()
+            .ends_with(&format!(".{}", env::current_account_id()))
     }
 
     /// V3: a pass with a lock or a listing cannot move or start an account operation.
@@ -963,19 +1735,42 @@ impl Registry {
         if let Some(lock) = self.locks.get(token_id) {
             match lock.kind {
                 LockKind::AccountOp => env::panic_str("account operation in progress"),
-                LockKind::TransferCall => env::panic_str("pass is in the middle of nft_transfer_call"),
+                LockKind::TransferCall => {
+                    env::panic_str("pass is in the middle of nft_transfer_call")
+                }
             }
         }
-        require!(!self.listings.contains_key(token_id), "pass is listed; delist it first");
+        require!(
+            !self.listings.contains_key(token_id),
+            "pass is listed; delist it first"
+        );
     }
 
-    fn begin_account_op(&mut self, token_id: &TokenId, op: &str, receiver: &AccountId, amount: u128) {
+    fn begin_account_op(
+        &mut self,
+        token_id: &TokenId,
+        op: &str,
+        receiver: &AccountId,
+        amount: u128,
+    ) {
         let caller = env::predecessor_account_id();
-        require!(caller == self.owner_of(token_id), "only the current holder can operate the pass account");
+        require!(
+            caller == self.owner_of(token_id),
+            "only the current holder can operate the pass account"
+        );
         self.assert_idle(token_id);
-        self.locks.insert(token_id, &Lock { kind: LockKind::AccountOp, since_block: U64(env::block_height()) });
-        emit("account_op_started", json!({ "token_id": token_id, "account_id": self.pass_account_id(token_id),
-            "controller": caller, "op": op, "receiver_id": receiver, "amount": U128(amount) }));
+        self.locks.insert(
+            token_id,
+            &Lock {
+                kind: LockKind::AccountOp,
+                since_block: U64(env::block_height()),
+            },
+        );
+        emit(
+            "account_op_started",
+            json!({ "token_id": token_id, "account_id": self.pass_account_id(token_id),
+            "controller": caller, "op": op, "receiver_id": receiver, "amount": U128(amount) }),
+        );
     }
 
     /// Every ownership change: new epoch, counter, and an explicit control event.
@@ -984,8 +1779,11 @@ impl Registry {
         pass.owner_epoch += 1;
         pass.transfers += 1;
         self.passes.insert(token_id, &pass);
-        emit("control_changed", json!({ "token_id": token_id, "account_id": self.pass_account_id(token_id),
-            "previous_controller": from, "controller": to, "owner_epoch": pass.owner_epoch }));
+        emit(
+            "control_changed",
+            json!({ "token_id": token_id, "account_id": self.pass_account_id(token_id),
+            "previous_controller": from, "controller": to, "owner_epoch": pass.owner_epoch }),
+        );
     }
 
     fn distribute(&mut self, p: &mut Programme, amount: u128, source: &str) {
@@ -995,8 +1793,11 @@ impl Registry {
             p.treasury = U128(p.treasury.0 + total);
             self.totals.treasury += total;
             p.carry = U128(0);
-            emit("revenue_distributed", json!({ "programme_id": p.id, "source": source, "amount": U128(amount),
-                "per_pass": U128(0), "passes": 0, "to_treasury": U128(total) }));
+            emit(
+                "revenue_distributed",
+                json!({ "programme_id": p.id, "source": source, "amount": U128(amount),
+                "per_pass": U128(0), "passes": 0, "to_treasury": U128(total) }),
+            );
             return;
         }
         let per_pass = total / p.active_passes as u128;
@@ -1008,9 +1809,12 @@ impl Registry {
         p.carry = U128(carry);
         self.totals.reserved += credited;
         self.totals.carry += carry;
-        emit("revenue_distributed", json!({ "programme_id": p.id, "source": source, "amount": U128(amount),
+        emit(
+            "revenue_distributed",
+            json!({ "programme_id": p.id, "source": source, "amount": U128(amount),
             "per_pass": U128(per_pass), "passes": p.active_passes, "carry": U128(carry),
-            "reward_index": p.reward_index }));
+            "reward_index": p.reward_index }),
+        );
     }
 
     fn add_points(&mut self, token_id: &TokenId, points: u32, reason: &str) {
@@ -1020,8 +1824,11 @@ impl Registry {
         let new_tier = tier_for(pass.points);
         self.passes.insert(token_id, &pass);
         if new_tier != old_tier {
-            emit("tier_changed", json!({ "token_id": token_id, "from": TIERS[old_tier].0, "to": TIERS[new_tier].0,
-                "points": pass.points, "reason": reason }));
+            emit(
+                "tier_changed",
+                json!({ "token_id": token_id, "from": TIERS[old_tier].0, "to": TIERS[new_tier].0,
+                "points": pass.points, "reason": reason }),
+            );
         }
         let p = self.programme_or_panic(pass.programme_id);
         let metadata = self.build_metadata(token_id, &pass, &p, env::block_timestamp_ms());
@@ -1036,7 +1843,13 @@ impl Registry {
         ));
     }
 
-    fn build_metadata(&self, token_id: &TokenId, pass: &Pass, p: &Programme, now_ms: u64) -> TokenMetadata {
+    fn build_metadata(
+        &self,
+        token_id: &TokenId,
+        pass: &Pass,
+        p: &Programme,
+        now_ms: u64,
+    ) -> TokenMetadata {
         let tier = TIERS[tier_for(pass.points)].0;
         TokenMetadata {
             title: Some(format!("{} #{token_id} · {tier}", p.name)),
@@ -1066,9 +1879,14 @@ impl Registry {
     fn charge_storage(&mut self, before: u64, payer: &AccountId) {
         let cost = self.storage_cost_since(before);
         let attached = env::attached_deposit().as_yoctonear();
-        require!(attached >= cost, format!("attach at least {cost} yoctoNEAR for storage"));
+        require!(
+            attached >= cost,
+            format!("attach at least {cost} yoctoNEAR for storage")
+        );
         if attached > cost {
-            Promise::new(payer.clone()).transfer(NearToken::from_yoctonear(attached - cost)).detach();
+            Promise::new(payer.clone())
+                .transfer(NearToken::from_yoctonear(attached - cost))
+                .detach();
         }
     }
 
@@ -1084,19 +1902,33 @@ impl Registry {
     }
 
     fn pay(&self, to: AccountId, amount: u128, reason: &str) -> Promise {
-        Promise::new(to.clone()).transfer(NearToken::from_yoctonear(amount)).then(
-            Self::ext(env::current_account_id())
-                .with_static_gas(PAYOUT_CALLBACK_GAS)
-                .on_payout(to, U128(amount), reason.to_string()),
-        )
+        Promise::new(to.clone())
+            .transfer(NearToken::from_yoctonear(amount))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(PAYOUT_CALLBACK_GAS)
+                    .on_payout(to, U128(amount), reason.to_string()),
+            )
     }
 
     fn pay_pass_account(&self, token_id: &TokenId, amount: u128, reason: &str) -> Promise {
-        Promise::new(self.pass_account_id(token_id)).transfer(NearToken::from_yoctonear(amount)).then(
-            Self::ext(env::current_account_id())
-                .with_static_gas(PAYOUT_CALLBACK_GAS)
-                .on_pass_payout(token_id.clone(), U128(amount), reason.to_string()),
-        )
+        Promise::new(self.pass_account_id(token_id))
+            .transfer(NearToken::from_yoctonear(amount))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(PAYOUT_CALLBACK_GAS)
+                    .on_pass_payout(token_id.clone(), U128(amount), reason.to_string()),
+            )
+    }
+
+    fn pay_campaign_account(&self, token_id: &TokenId, amount: u128) -> Promise {
+        Promise::new(self.pass_account_id(token_id))
+            .transfer(NearToken::from_yoctonear(amount))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(PAYOUT_CALLBACK_GAS)
+                    .on_campaign_payout(token_id.clone(), U128(amount)),
+            )
     }
 }
 
@@ -1140,11 +1972,21 @@ fn tier_art(token_id: &str, tier: &str, points: u32) -> String {
 #[near]
 impl NonFungibleTokenCore for Registry {
     #[payable]
-    fn nft_transfer(&mut self, receiver_id: AccountId, token_id: TokenId, approval_id: Option<u64>, memo: Option<String>) {
+    fn nft_transfer(
+        &mut self,
+        receiver_id: AccountId,
+        token_id: TokenId,
+        approval_id: Option<u64>,
+        memo: Option<String>,
+    ) {
         self.assert_idle(&token_id);
-        require!(!self.is_pass_account(&receiver_id), "a pass account cannot hold a pass");
+        require!(
+            !self.is_pass_account(&receiver_id),
+            "a pass account cannot hold a pass"
+        );
         let from = self.owner_of(&token_id);
-        self.tokens.nft_transfer(receiver_id.clone(), token_id.clone(), approval_id, memo);
+        self.tokens
+            .nft_transfer(receiver_id.clone(), token_id.clone(), approval_id, memo);
         self.owner_changed(&token_id, &from, &receiver_id);
     }
 
@@ -1160,10 +2002,23 @@ impl NonFungibleTokenCore for Registry {
         msg: String,
     ) -> PromiseOrValue<bool> {
         self.assert_idle(&token_id);
-        require!(!self.is_pass_account(&receiver_id), "a pass account cannot hold a pass");
-        self.locks.insert(&token_id, &Lock { kind: LockKind::TransferCall, since_block: U64(env::block_height()) });
-        emit("transfer_call_locked", json!({ "token_id": token_id, "receiver_id": receiver_id }));
-        self.tokens.nft_transfer_call(receiver_id, token_id, approval_id, memo, msg)
+        require!(
+            !self.is_pass_account(&receiver_id),
+            "a pass account cannot hold a pass"
+        );
+        self.locks.insert(
+            &token_id,
+            &Lock {
+                kind: LockKind::TransferCall,
+                since_block: U64(env::block_height()),
+            },
+        );
+        emit(
+            "transfer_call_locked",
+            json!({ "token_id": token_id, "receiver_id": receiver_id }),
+        );
+        self.tokens
+            .nft_transfer_call(receiver_id, token_id, approval_id, memo, msg)
     }
 
     fn nft_token(&self, token_id: TokenId) -> Option<Token> {
@@ -1191,7 +2046,10 @@ impl NonFungibleTokenResolver for Registry {
         if kept {
             self.owner_changed(&token_id, &previous_owner_id, &receiver_id);
         }
-        emit("transfer_call_unlocked", json!({ "token_id": token_id, "kept_by_receiver": kept }));
+        emit(
+            "transfer_call_unlocked",
+            json!({ "token_id": token_id, "kept_by_receiver": kept }),
+        );
         kept
     }
 }
@@ -1207,8 +2065,14 @@ impl NonFungibleTokenEnumeration for Registry {
     fn nft_supply_for_owner(&self, account_id: AccountId) -> U128 {
         self.tokens.nft_supply_for_owner(account_id)
     }
-    fn nft_tokens_for_owner(&self, account_id: AccountId, from_index: Option<U128>, limit: Option<u64>) -> Vec<Token> {
-        self.tokens.nft_tokens_for_owner(account_id, from_index, limit)
+    fn nft_tokens_for_owner(
+        &self,
+        account_id: AccountId,
+        from_index: Option<U128>,
+        limit: Option<u64>,
+    ) -> Vec<Token> {
+        self.tokens
+            .nft_tokens_for_owner(account_id, from_index, limit)
     }
 }
 
