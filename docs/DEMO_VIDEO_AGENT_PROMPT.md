@@ -86,7 +86,7 @@ Return:
 
 1. The final MP4 (1080p preferred).
 2. A short list of any factual discrepancies, loading errors, or screens that differed from this brief.
-3. A suggested post draft for the human to review, not a published post. The post must say the project was built at **NEAR HACKATHON**, tag **@NEARProtocol** and **#NEARHackathon**, attach the demo video, and link the public repository and live demo. Optional tags are `@NearLegion` and `@NearBuilders`.
+3. A short note confirming the video corresponds to the already published [CrewPass demo post](https://x.com/oyetoludan01/status/2121697996081410382). Do not create a duplicate post. The human can verify the published post includes the video, required tags, and project links.
 
 Never publish the post or submit the project. The human posts it themselves. The human must check the latest HACKATHON.md before posting/submitting. The hackathon has one submission per project; if already submitted, never submit it again. Submission mistakes are handled through the event’s request-changes process, not by creating a second submission.
 

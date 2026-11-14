@@ -98,11 +98,10 @@ personal wallet to try a write flow.
 | Reward campaigns | Contract and dashboard are deployed and tested, but programme 1 has no campaign yet. Creating one requires the creator wallet and testnet NEAR. |
 | Private AI / TEE provider | Provider-agnostic interface and verified NEAR AI integration are implemented. Live TEE credentials/runtime are not configured or verified, so the hosted companion must not be described as confidential AI. |
 
-**Submission item still needed:** no public X demo-post URL is recorded in this repository. The builder
-must publish the demo video with `@NEARProtocol` and `#NEARHackathon`, then add the post link here
-and use it in the form. The public repo and hosted app are available above. The submission's team
-lead, email, team size, mainnet prize wallet and consent are supplied by the human in the form; they
-do not belong in this repository.
+**Public demo post:** [CrewPass on X](https://x.com/oyetoludan01/status/2121697996081410382). The builder
+provided this link as the published demo post. It should be included in the hackathon application
+with the public repository URL above. The submission's team lead, email, team size, mainnet prize
+wallet and consent are supplied by the human in the form; they do not belong in this repository.
 
 ## How it works in one picture
 
