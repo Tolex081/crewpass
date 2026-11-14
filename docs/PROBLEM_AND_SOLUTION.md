@@ -1,6 +1,6 @@
 # CrewPass: the problem, the solution, and how it works step by step
 
-CrewPass is a membership protocol on NEAR where **every membership NFT owns a real NEAR account**. The
+CrewPass is a membership protocol on NEAR where **every membership NFT owns a NEAR testnet account**. The
 pass earns from its programme into that account, carries verifiable achievements and a tier that evolves
 on chain, opens members-only benefits and a private AI companion, and transfers all of it, account control
 included, to its next owner. The seller keeps nothing they could use.
@@ -10,9 +10,9 @@ included, to its next owner. The seller keeps nothing they could use.
 | **Track** | NEAR Hackathon Track 10: *NFTs That Do Something* |
 | **Network** | NEAR testnet: registry `crewpass-v2.testnet`, pass accounts `N.crewpass-v2.testnet` |
 | **Live site** | https://crewpass-steel.vercel.app |
-| **Tests** | 68 V2 contract unit, 11 V2 sandbox (real local NEAR node), 43 web server; V1 36 + 6 |
+| **Tests** | 64 V2 registry + 9 pass-account unit, 11 V2 sandbox (real local NEAR node), 46 web server; V1 36 + 6 |
 | **Live proof** | [deploy/v2-live-run.md](../deploy/v2-live-run.md) (29 testnet transactions, 0 unexpected), [deploy/v2-web-check.md](../deploy/v2-web-check.md) (12 checks, 0 unexpected) |
-| **History** | V1 (2026-11-06/08): passes with an internal vault, on `crewpass.testnet`, unchanged. V2 (2026-11-12/13): real accounts, revenue, tiers |
+| **History** | V1 (2026-11-06/08): passes with an internal vault, on `crewpass.testnet`, unchanged. V2 (2026-11-12/14): accounts, revenue, tiers, royalties, creator content and reward campaigns |
 
 ---
 
@@ -122,10 +122,10 @@ opens for her through the ticket attached to the pass. Sending the pass to a pas
 
 | Component | Files | Tests |
 |---|---|---|
-| Registry contract | `contract-v2/src/lib.rs` | 59 unit, 11 sandbox |
+| Registry contract | `contract-v2/src/lib.rs` | 64 unit, 11 sandbox |
 | Pass-account code (global contract) | `pass-account/src/lib.rs` | 9 unit, sandbox |
 | Test-only target and hostile receiver | `test-target/src/lib.rs` | used by sandbox and live run |
-| Web API (V2 routes, paged history, shared nonces, epoch memory, event access, creator gate) | `web/server/v2.ts`, `near.ts`, `tokens.ts`, `memory.ts`, `catalog.ts` | 43 web tests |
+| Web API (V2 routes, paged history, shared nonces, epoch memory, event access, creator gate) | `web/server/v2.ts`, `near.ts`, `tokens.ts`, `memory.ts`, `catalog.ts` | 46 web tests |
 | Web app (10 sections + V1 archive) | `web/src/pages/*`, `web/src/components/PassCardV2.tsx` | checked in the browser against testnet |
 | Deploy and evidence | `deploy/v2-deploy.sh`, `deploy/v2-live-run.sh`, `web/scripts/v2-web-check.ts`, `deploy/testnet-v2.json` | 29 + 12 live checks |
 | Design and security docs | `docs/ADR-001-pass-accounts.md`, `THREAT_MODEL.md`, `docs/PRODUCT.md`, `docs/AUDIT.md` | — |

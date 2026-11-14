@@ -42,10 +42,10 @@ function ControlDiagram({ contract }: { contract: string }) {
 const FEATURES: { title: string; body: string; status: "live" | "planned" }[] = [
   { title: "A real account per pass", body: "Minting pass N creates N.registry with no access keys. It holds NEAR, calls other contracts and shows in any explorer.", status: "live" },
   { title: "Control is ownership", body: "The account obeys only the registry, and the registry only the current owner. A sale moves control in the same receipt. No key to rotate, so none to keep.", status: "live" },
-  { title: "Earns from the programme", body: "Part of every ticket goes to a pool shared by every pass. Claims pay real NEAR into the pass accounts. Referrals pay the referring pass's account.", status: "live" },
+  { title: "Earns from the programme", body: "Part of every ticket goes to a pool shared by every pass. Claims pay testnet NEAR into the pass accounts. Referrals pay the referring pass's account.", status: "live" },
   { title: "Evolves on chain", body: "Check-ins, achievements and referrals add points. Bronze, Silver, Gold, Platinum are computed by the contract and written into the NFT's metadata.", status: "live" },
   { title: "Safe hand-over", body: "While a withdrawal, call, listing or nft_transfer_call is in flight the pass is locked, so nobody sells it from under a pending payment.", status: "live" },
-  { title: "Private companion", body: "Each holder gets an AI companion that reads the pass's live state. Memory is encrypted per holder and per ownership period.", status: "live" },
+  { title: "Holder-scoped companion", body: "Each holder gets an AI companion that reads the pass's live state. Memory is encrypted per holder and per ownership period; provider privacy depends on the configured service.", status: "live" },
 ];
 
 export function LandingPage() {

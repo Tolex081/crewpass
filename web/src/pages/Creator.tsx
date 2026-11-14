@@ -77,7 +77,7 @@ function Dashboard({ programme, token, contract, config }: { programme: Programm
     summary: programme.description,
     companion_name: `${programme.name} companion`,
     companion_tone: "Friendly, concise and practical.",
-    benefits: [{ text: "Members area and private companion for current holders", min_tier: 0 }],
+    benefits: [{ text: "Members area and holder-scoped AI companion", min_tier: 0 }],
     posts: [{ title: `Welcome to ${programme.name}`, body: programme.description, min_tier: 0 }],
     knowledge: [{ title: programme.name, body: programme.description }],
   };

@@ -1,8 +1,8 @@
 # CrewPass
 
-**Membership NFTs that own a real NEAR account.** Every CrewPass is a NEP-171 NFT with its own keyless
+**Membership NFTs that own a NEAR testnet account.** Every CrewPass is a NEP-171 NFT with its own keyless
 NEAR account (`7.crewpass-v2.testnet` for pass #7). The pass earns from its programme (ticket revenue,
-creator-funded rewards, referrals) as real NEAR in that account. It carries verifiable achievements and moves from
+creator-funded rewards, referrals) as testnet NEAR in that account. It carries verifiable achievements and moves from
 Bronze to Platinum, with its NFT metadata updated on chain. When it is sold, the buyer controls the account
 from the same receipt, and the seller keeps no key, session or other route back in.
 
@@ -11,6 +11,7 @@ from the same receipt, and the seller keeps no key, session or other route back 
 | **Track** | NEAR Hackathon Track 10: *NFTs That Do Something* (`nfts`) |
 | **Network** | NEAR testnet only |
 | **Live site** | https://crewpass-steel.vercel.app |
+| **Public repository** | https://github.com/Tolex081/crewpass |
 | **V2 registry** | [`crewpass-v2.testnet`](https://testnet.nearblocks.io/address/crewpass-v2.testnet) |
 | **Pass-account code** | global contract, by hash `CuX7PYtWMa9ZG18jkHGTYKutgQVQoKNWiQSFvmmzEzRL` (immutable) |
 | **V1 (archive, unchanged)** | [`crewpass.testnet`](https://testnet.nearblocks.io/address/crewpass.testnet) |
@@ -27,6 +28,79 @@ from the same receipt, and the seller keeps no key, session or other route back 
 4. **[deploy/v2-live-run.md](deploy/v2-live-run.md)**: the whole journey on testnet, every transaction linked.
 5. **[docs/PRODUCT.md](docs/PRODUCT.md)**: product, architecture, what is built and what is planned.
 6. **[docs/AUDIT.md](docs/AUDIT.md)**: this build checked against the V2 brief and Track 10, line by line.
+
+## NEAR HACKATHON submission and provenance
+
+CrewPass addresses the gap between a membership NFT and the benefits it represents: usually the access,
+earnings and authority stay with a person or a website account. Here the NEP-171 pass is paired with a
+NEAR testnet account. The registry checks the current NFT owner before acting for that account. A sale
+changes the NFT owner and account controller together, so the buyer receives the membership's account,
+rewards and access rights.
+
+**NEAR's role:** the account is a real account on NEAR testnet, created by the registry for the pass and
+running shared immutable code without access keys. Referral and reward payments are on-chain NEAR
+transfers; contract state determines tiers and access. Testnet tokens have no monetary value.
+
+**Work window:** this repository's first commit is dated 2026-11-06, after the event opened on
+2026-11-01. The repository contains no pre-hackathon product baseline. V1 was the first in-window
+implementation; V2 is the in-window redesign where every pass owns an account. The
+[hackathon-submission branch](https://github.com/Tolex081/crewpass/tree/hackathon-submission) is the
+judge copy. [Compare the event work from the Day 1 root commit](https://github.com/Tolex081/crewpass/compare/78fc1d25b5f5ac2c79df4873857e89262f2138da...hackathon-submission);
+that root commit is itself within the event and is included in the submission branch.
+
+**Related independent project:** [Atesta](https://github.com/Tolex081/atesta) is a separate NEAR
+Hackathon project by the same builder, with its own [live demo](https://atesta-near.vercel.app/).
+Atesta issues non-transferable contribution credentials after organisation review; CrewPass makes
+transferable membership passes that control keyless accounts. The projects solve different problems.
+Atesta's README already links back to CrewPass and discloses the two independent submissions.
+
+**Tools and libraries:** Rust and `near-sdk` 5.30.1 for contracts; React 19, TypeScript, Vite, Hono
+and Node.js for the site and API; NEAR Connect and `near-api-js` for wallet and chain access; the
+official NEAR AI inference SDK is an optional server-side provider. The project was developed with
+OpenAI Codex assistance. See `web/package.json` and each Rust crate manifest for pinned dependencies.
+
+## Judge walkthrough (about three minutes; no wallet needed)
+
+The read-only path below uses existing public testnet data. No transaction is required.
+
+1. **Open the [live CrewPass app](https://crewpass-steel.vercel.app/).** See the testnet badge and live
+   registry totals. The page identifies CrewPass as membership passes that own accounts.
+2. **Choose [`Discover`](https://crewpass-steel.vercel.app/#/discover) → `Study Crew`.** See the live programme, mint price, ticket share, referral
+   rate, resale royalty, and the two existing passes. The ticket is 0.05 testnet NEAR and allocates
+   half to the members' pool.
+3. **Open [pass `#1`](https://crewpass-steel.vercel.app/#/pass/1).** See its current owner (`crewpass-carol.testnet`), Gold tier, points, activity,
+   and its own account (`1.crewpass-v2.testnet`). In “The pass's own account,” check `Access keys: 0`,
+   the published code hash, and “✓ No keys.” Click the account link to inspect it on NEAR Explorer.
+4. **Open [`Proof`](https://crewpass-steel.vercel.app/#/proof).** Find the live transaction table and open a transaction hash. The explorer shows
+   the on-chain receipt; successful and refused attempts document minting, account control, sale,
+   and the hostile receiver check. For the full annotated sequence, read
+   [the testnet live run](deploy/v2-live-run.md).
+5. **Open [`Events`](https://crewpass-steel.vercel.app/#/events).** See the existing “Live study session,” its 0.05 NEAR testnet ticket, 30 points,
+   and current seat count. Do not buy a ticket just to inspect the demo; buying is a wallet transaction.
+6. **Open [`Rewards`](https://crewpass-steel.vercel.app/#/rewards/1).** See the public distribution and pass-level claim record. The programme does
+   not currently have a live reward campaign, so the campaign list is empty. No wallet is needed to
+   inspect the records.
+
+**Other paths:** `Members` asks the current pass holder to connect a wallet and sign a NEP-413
+message; every gated request rechecks ownership. `Creator` changes are limited to the programme's
+creator and require that creator's wallet. Judges should not sign or submit transactions from a
+personal wallet to try a write flow.
+
+## What is live in the demo, and what is not
+
+| Feature | Status for judges |
+|---|---|
+| Keyless account per pass, ownership handover, tier and revenue history | Live on testnet; inspect pass #1 and the Proof page |
+| Fixed 5% creator resale royalty | Deployed and covered by contract tests; CrewPass's own sale method pays it |
+| Creator-edited member content | Editor and on-chain contract method are deployed. Programme 1 has no saved on-chain content (`programme_content(1)` returns `null`); its visible demo description and benefit copy come from the site's sample catalogue. Saving content requires the creator wallet. |
+| Reward campaigns | Contract and dashboard are deployed and tested, but programme 1 has no campaign yet. Creating one requires the creator wallet and testnet NEAR. |
+| Private AI / TEE provider | Provider-agnostic interface and verified NEAR AI integration are implemented. Live TEE credentials/runtime are not configured or verified, so the hosted companion must not be described as confidential AI. |
+
+**Submission item still needed:** no public X demo-post URL is recorded in this repository. The builder
+must publish the demo video with `@NEARProtocol` and `#NEARHackathon`, then add the post link here
+and use it in the form. The public repo and hosted app are available above. The submission's team
+lead, email, team size, mainnet prize wallet and consent are supplied by the human in the form; they
+do not belong in this repository.
 
 ## How it works in one picture
 
@@ -49,9 +123,8 @@ flowchart LR
 
 ## Try it
 
-**In the browser.** Open the live site, connect a testnet wallet, open *Discover → Study Crew* and mint. The pass
-page shows the new account with "✓ No keys" and "✓ Runs the published pass-account code", read live from the
-chain. Buy a ticket on *Events*, claim on *Rewards*, open *Members* to see tier-gated content and the companion.
+**In the browser.** Follow the wallet-free [judge walkthrough](#judge-walkthrough-about-three-minutes-no-wallet). To exercise writes,
+connect your own testnet wallet, use the faucet if needed, and approve only the transaction you intend to try.
 
 **Without installing anything.** Read [deploy/v2-live-run.md](deploy/v2-live-run.md). Each row is a real
 transaction: a programme launches, Alice's pass gets its own account, referral and ticket revenue land in

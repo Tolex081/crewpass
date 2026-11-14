@@ -36,10 +36,10 @@ function Table({ rows }: { rows: ProofRow[] }) {
 }
 
 /** Test counts from the last full runs (scripts/test.sh, scripts/test-v2.sh, npm test in web/). */
-export const TESTS = { v2Unit: 68, v2Sandbox: 11, web: 43, v1Unit: 36, v1Sandbox: 6 };
+export const TESTS = { v2Unit: 73, v2Sandbox: 11, web: 46, v1Unit: 36, v1Sandbox: 6 };
 
 const CONTRACTS = [
-  { what: "V2 registry (NEP-171, 177, 181, 297)", id: "crewpass-v2.testnet", note: "wasm sha256 e77ca695…0e5853" },
+  { what: "V2 registry (NEP-171, 177, 181, 297)", id: "crewpass-v2.testnet", note: "wasm sha256 72a927f5…db47e05 (2026-11-14 upgrade)" },
   { what: "Pass-account code (global contract, by hash)", id: "CuX7PYtWMa9ZG18jkHGTYKutgQVQoKNWiQSFvmmzEzRL", note: "wasm sha256 b0e4cdcd…a921f, 43.6 KB, immutable" },
   { what: "Pass #1's own account", id: "1.crewpass-v2.testnet", note: "no access keys; created at mint" },
   { what: "Test-only target / hostile receiver", id: "crewpass-v2-target.testnet", note: "never part of the product" },
