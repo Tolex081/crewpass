@@ -86,7 +86,7 @@ Return:
 
 1. The final MP4 (1080p preferred).
 2. A short list of any factual discrepancies, loading errors, or screens that differed from this brief.
-3. A short note confirming the video corresponds to the already published [CrewPass demo post](https://x.com/oyetoludan01/status/2121697996081410382). Do not create a duplicate post. The human can verify the published post includes the video, required tags, and project links.
+3. A short note confirming the video corresponds to the already published [CrewPass demo post](https://x.com/oyetoludan01/status/2121701051023884468). Do not create a duplicate post. The human can verify the published post includes the video, required tags, and project links.
 
 Never publish the post or submit the project. The human posts it themselves. The human must check the latest HACKATHON.md before posting/submitting. The hackathon has one submission per project; if already submitted, never submit it again. Submission mistakes are handled through the event’s request-changes process, not by creating a second submission.
 
