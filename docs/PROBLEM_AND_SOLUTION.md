@@ -2,7 +2,7 @@
 
 CrewPass is a membership protocol on NEAR where **every membership NFT owns a NEAR testnet account**. The
 pass earns from its programme into that account, carries verifiable achievements and a tier that evolves
-on chain, opens members-only benefits and a private AI companion, and transfers all of it, account control
+on chain, opens members-only benefits and a holder-scoped AI companion, and transfers all of it, account control
 included, to its next owner. The seller keeps nothing they could use.
 
 | | |

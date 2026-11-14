@@ -325,6 +325,36 @@ tr:last-child td { border-bottom: 0; }
 .diagram svg { display: block; width: 100%; min-width: 420px; height: auto; }
 .diagram text { fill: var(--fg); font-family: var(--font-body); }
 .diagram .sub { fill: var(--muted); font-family: var(--font-data); }
+
+/* Product polish: editorial landing, tactile cards, and clearer live status. */
+:root { --radius: 16px; }
+body { background: radial-gradient(ellipse at 8% 0%, color-mix(in srgb, var(--teal-soft) 70%, transparent), transparent 34rem), radial-gradient(ellipse at 95% 18%, color-mix(in srgb, var(--violet-soft) 48%, transparent), transparent 32rem), var(--bg); }
+.top { background: color-mix(in srgb, var(--surface) 88%, transparent); }
+.top .wrap { max-width: 1240px; min-height: 68px; }
+main .wrap { max-width: 1240px; gap: 40px; }
+nav a { transition: background 160ms ease, color 160ms ease; }
+nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+.hero { position: relative; isolation: isolate; padding: clamp(26px, 5vw, 64px); border: 1px solid var(--line); border-radius: 28px; background: linear-gradient(125deg, var(--surface) 12%, color-mix(in srgb, var(--teal-soft) 60%, var(--surface)) 100%); box-shadow: 0 24px 70px -48px color-mix(in srgb, var(--accent) 55%, transparent); }
+.hero { overflow: hidden; min-height: 390px; }
+.hero::before { content: ""; position: absolute; z-index: -1; width: 360px; height: 360px; right: -140px; bottom: -220px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); box-shadow: 0 0 0 26px color-mix(in srgb, var(--accent) 4%, transparent), 0 0 0 54px color-mix(in srgb, var(--violet) 5%, transparent), 0 0 0 84px color-mix(in srgb, var(--accent) 4%, transparent); }
+.hero::after { content: "ON-CHAIN MEMBERSHIP"; position: absolute; z-index: -1; right: 28px; top: 20px; color: var(--accent); opacity: .55; font: 600 10px var(--font-data); letter-spacing: .16em; }
+.hero h1 { max-width: 12ch; font-size: clamp(2.6rem, 6vw, 5.4rem); line-height: .98; letter-spacing: -.055em; }
+.hero .lede { color: var(--fg); max-width: 46ch; }
+.diagram { border-radius: 20px; box-shadow: 0 16px 42px -32px #001b2b; }
+.panel { border-radius: 18px; box-shadow: 0 8px 28px -24px rgb(13 25 40 / .45); transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease; }
+.card-link:hover .panel { transform: translateY(-3px); box-shadow: 0 16px 36px -25px color-mix(in srgb, var(--accent) 40%, transparent); }
+.stats > div { border: 1px solid color-mix(in srgb, var(--h, var(--line)) 28%, transparent); border-radius: 16px; }
+.stats > div { position: relative; overflow: hidden; min-height: 92px; }
+.stats > div::after { content: ""; position: absolute; width: 54px; height: 54px; right: -14px; bottom: -20px; border: 9px solid color-mix(in srgb, var(--h, var(--accent)) 14%, transparent); border-radius: 50%; }
+.grid-cards > .panel { position: relative; overflow: hidden; }
+.grid-cards > .panel::before { content: ""; height: 3px; position: absolute; top: 0; left: 20px; right: 20px; border-radius: 0 0 4px 4px; background: linear-gradient(90deg, var(--teal), var(--violet), var(--coral)); opacity: .65; }
+.ribbons span { border-radius: 999px; transform-origin: bottom; animation: ribbon-rise 600ms cubic-bezier(.2,.8,.2,1) both; }
+.ribbons span:nth-child(2) { animation-delay: 60ms; }.ribbons span:nth-child(3) { animation-delay: 120ms; }.ribbons span:nth-child(4) { animation-delay: 180ms; }.ribbons span:nth-child(5) { animation-delay: 240ms; }.ribbons span:nth-child(6) { animation-delay: 300ms; }
+@keyframes ribbon-rise { from { transform: scaleY(.15); opacity: .25; } to { transform: scaleY(1); opacity: 1; } }
+button, .btn { border-radius: 999px; transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease; }
+button:hover:not(:disabled), .btn:hover { transform: translateY(-1px); box-shadow: 0 8px 18px -12px var(--accent); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+@media (max-width: 800px) { .hero { min-height: unset; padding: 26px 22px; } .hero::after { top: 12px; right: 14px; font-size: 8px; } }
 textarea {
   font: 400 var(--step-0)/1.4 var(--font-body); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--surface); color: var(--fg); width: 100%; min-width: 0; resize: vertical;

@@ -13,7 +13,7 @@ Last updated: 2026-11-14. The V2 additions described below are deployed to testn
 **CrewPass is a membership protocol on NEAR where each membership NFT owns its financial position.**
 A creator launches a programme. Members mint passes. Every pass is a NEP-171 token **and** its own keyless
 NEAR account. The pass earns from the programme's activity, carries verifiable achievements, evolves
-from Bronze to Platinum, opens members-only benefits and a private AI companion, and transfers all of it
+from Bronze to Platinum, opens members-only benefits and a holder-scoped AI companion, and transfers all of it
 (account control included) to its next owner.
 
 It is not a marketplace, a dashboard or a chatbot with an NFT attached. The NFT is the authoritative credential;

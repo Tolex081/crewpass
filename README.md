@@ -54,10 +54,12 @@ Atesta issues non-transferable contribution credentials after organisation revie
 transferable membership passes that control keyless accounts. The projects solve different problems.
 Atesta's README already links back to CrewPass and discloses the two independent submissions.
 
-**Tools and libraries:** Rust and `near-sdk` 5.30.1 for contracts; React 19, TypeScript, Vite, Hono
-and Node.js for the site and API; NEAR Connect and `near-api-js` for wallet and chain access; the
-official NEAR AI inference SDK is an optional server-side provider. The project was developed with
-OpenAI Codex assistance. See `web/package.json` and each Rust crate manifest for pinned dependencies.
+**Tools and libraries:** Rust with `near-sdk` and `near-contract-standards` for the contracts;
+React, TypeScript and Vite for the site; Hono on Node.js for the API; `@hot-labs/near-connect` and
+`near-api-js` for wallet and chain access; `@nearai/inference-sdk` as an optional server-side AI
+provider. `near-sandbox`, `near-api`, Tokio and `testresult` support Rust integration tests. Versions
+are pinned in `Cargo.lock`, `web/package.json` and `web/package-lock.json`. The project was developed
+with OpenAI Codex assistance; no pre-hackathon CrewPass code baseline is present in this repository.
 
 ## Judge walkthrough (about three minutes; no wallet needed)
 
